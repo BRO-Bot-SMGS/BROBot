@@ -37,6 +37,8 @@
 #define SENSOR_ARRAY_SIZE 13
 #define EMITTER_PIN 34
 
+const uint8_t SensorCount = 13;
+
 byte SENSOR_PIN_ARRAY[SENSOR_ARRAY_SIZE] = 
     {SENSOR_ARRAY_1, SENSOR_ARRAY_2, SENSOR_ARRAY_3, SENSOR_ARRAY_4, SENSOR_ARRAY_5, SENSOR_ARRAY_6, SENSOR_ARRAY_7, SENSOR_ARRAY_8, SENSOR_ARRAY_9, SENSOR_ARRAY_10, SENSOR_ARRAY_11, SENSOR_ARRAY_12, SENSOR_ARRAY_13};
 
@@ -50,13 +52,23 @@ byte SENSOR_PIN_ARRAY[SENSOR_ARRAY_SIZE] =
 #define MULTIPLEXER_I2C_ADDRESS 0x07
 #define _I2C_ADDRESS 0x08
 
+#define OLED_1_I2C_PORT 1
+#define OLED_2_I2C_PORT 2
+#define RGB_I2C_PORT 3
+#define TOF_I2C_PORT 4
+
+
 //settings
 float speed = 1;
 float kp = 0.5;
 float ki = 0.5;
 float kd = 0.5;
 float samplesPerRead = 4;
-float recommendedCalibrationTime = 0.5;
+float recommendedCalibrationTime = 12;
+int brightness = 255;
+int contrast = 255;
+#define OLED_DISPLAY_WIDTH 128
+#define OLED_DISPLAY_HEIGHT 64
 //rgb colors 
 byte greenColor[3] = {0, 255, 0};
 byte whiteColor[3] = {255, 0, 0};
@@ -67,20 +79,71 @@ byte blackColor[3] = {0, 0, 255};
 bool can_detected = false;
 float can_distance = 0;
 
+//global setup
+    // multiplexer setup
+DFRobot_I2C_Multiplexer multiplexer(&Wire, MULTIPLEXER_I2C_ADDRESS);
+    // sensor array setup
+    // For QTRSensorsAnalog
+QTRSensors qtra;
+// QTRSensors qtra((unsigned char[]) {SENSOR_ARRAY_1, SENSOR_ARRAY_2, SENSOR_ARRAY_3, SENSOR_ARRAY_4, SENSOR_ARRAY_5, SENSOR_ARRAY_6, SENSOR_ARRAY_7, SENSOR_ARRAY_8, SENSOR_ARRAY_9, SENSOR_ARRAY_10, SENSOR_ARRAY_11, SENSOR_ARRAY_12, SENSOR_ARRAY_13}, SENSOR_ARRAY_SIZE, EMITTER_PIN);
+    // OLED display setup
+Adafruit_SSD1306 display[2] = {
+    Adafruit_SSD1306(OLED_DISPLAY_WIDTH, OLED_DISPLAY_HEIGHT, &Wire, -1), //display 1 - use it with display[0]
+    Adafruit_SSD1306(OLED_DISPLAY_WIDTH, OLED_DISPLAY_HEIGHT, &Wire, -1) //display 2 - use it with display[1]
+};
+
 //functions
+
+
 
 void setPinModes(){
     for (int i = 0; i < SENSOR_ARRAY_SIZE; i++){
         pinMode(SENSOR_PIN_ARRAY[i], INPUT);
     }
+    pinMode(CALIBRATION_SWITCH, INPUT);
+    pinMode(PROGRAM_SWITCH, INPUT);
+    pinMode(SETTINGS_SWITCH, INPUT);
+    pinMode(MOTOR1_PWM, OUTPUT);
+    pinMode(MOTOR1_DIR, OUTPUT);
+    pinMode(MOTOR1_BRAKE, OUTPUT);
+    pinMode(MOTOR2_PWM, OUTPUT);
+    pinMode(MOTOR2_DIR, OUTPUT);
+    pinMode(MOTOR2_BRAKE, OUTPUT);
+    pinMode(ULTRASONIC_TRIG, OUTPUT);
+    pinMode(ULTRASONIC_ECHO, INPUT);
+    pinMode(EMITTER_PIN, OUTPUT);
 }
 
-void initI2C(){
-    Wire.begin();
+void resetDefaults(){
+    digitalWrite(MOTOR1_PWM, LOW);
+    digitalWrite(MOTOR1_DIR, LOW);
+    digitalWrite(MOTOR1_BRAKE, LOW);
+    digitalWrite(MOTOR2_PWM, LOW);
+    digitalWrite(MOTOR2_DIR, LOW);
+    digitalWrite(MOTOR2_BRAKE, LOW);
+    digitalWrite(ULTRASONIC_TRIG, LOW);
+    digitalWrite(EMITTER_PIN, HIGH);
 }
 
-void initOLED(display1_I2C, display2_I2C, brightness, contrast){
-    Wire.beginTransmission(OLED_I2C_ADDRESS);
+void initOLED(int displayNumber, int display_I2C, int textSize, int displayWidth, int displayHeight){
+    String displayInstance = displayNumber + "display";
+    Serial.println("OLED " + String(displayNumber) + " init started");
+    Wire.beginTransmission(display_I2C);
+    if(!display[displayNumber].begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
+        Serial.println(F("SSD1306 allocation failed"));
+    }
+    display[displayNumber].clearDisplay(); // clear the display
+    Serial.println("OLED " + String(displayNumber) + " init complete");
+
+    display[displayNumber].clearDisplay(); // clear the display
+    display[displayNumber].setTextSize(textSize); // set text size
+    display[displayNumber].setTextColor(SSD1306_WHITE); // set text color (won't actually change anything)
+    display[displayNumber].setCursor(0, 0); // set cursor position
+}
+
+void initDisplays(int display1_I2Cport, int display2_I2Cport, int textSize, int brightness, int contrast, int displayWidth, int displayHeight){
+    initOLED(0, display1_I2Cport, textSize, displayWidth, displayHeight);
+    initOLED(1, display2_I2Cport, textSize, displayWidth, displayHeight);
     Wire.write(0x00);
     Wire.endTransmission();
     //calibration display stuff
@@ -88,28 +151,60 @@ void initOLED(display1_I2C, display2_I2C, brightness, contrast){
 }
 
 
-void setup() {
-    Serial.begin(9600);
-    initI2C();
-    setPinModes();
-    initOLED();
-     
-}
-
 void calibrateSensor(){
     qtra.calibrate();
 }
 
-void calibrateSensorsWhile(switchPin, calibrationDisplayPin){
-    calibrationTimer = millis();
-    calibrations = 0;
+void calibrateSensorsWhile(int switchPin, int calibrationDisplayPin){
+    long unsigned int calibrationTimer = millis();
+    int calibrations = 0;
     while(digitalRead(switchPin) == HIGH){
         calibrateSensor();
         calibrations++;
         delay(10);
     }
+    return calibrations, calibrationTimer;
 }
 
-void loop() {
+void updateCalibrationDisplay(int calibrations, int calibrationTimer, bool switchStatus){
+    display[1].clearDisplay();
+    display[1].setTextSize(1);
+    display[1].setTextColor(SSD1306_WHITE);
+    display[1].println("Status: " + String(switchStatus));
+    display[1].setCursor(0, 0);
+    display[1].println("Calibrations: " + String(calibrations));
+    display[1].setCursor(0, 10);
+    display[1].println("Time: " + String(millis() - calibrationTimer));
+    display[1].display();
+}
 
+void initSensorArray(int emitterPin){
+    qtra.setTypeAnalog();
+    qtra.setSensorPins((const uint8_t[]){A0, A1, A2, A3, A4, A5}, SensorCount);
+    qtra.setEmitterPin(emitterPin);
+}
+
+
+
+
+
+
+
+
+void setup() {
+    Serial.begin(9600);
+    setPinModes();
+    initDisplays(OLED_1_I2C_ADDRESS, OLED_2_I2C_ADDRESS, 1, brightness, contrast, OLED_DISPLAY_WIDTH, OLED_DISPLAY_HEIGHT);
+
+}
+
+
+void loop() {
+    int calibrations = 0;
+    int calibrationTimer = 0;
+    if(digitalRead(CALIBRATION_SWITCH) == HIGH){
+        calibrateSensorsWhile(CALIBRATION_SWITCH, calibrationTimer);
+        updateCalibrationDisplay(calibrations, calibrationTimer, CALIBRATION_SWITCH);
+    }
+    delay(10);
 }
