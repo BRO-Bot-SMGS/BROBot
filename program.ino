@@ -29,6 +29,10 @@
 #define SENSOR_ARRAY_12 11
 #define SENSOR_ARRAY_13 12
 
+#define SENSOR_ARRAY_SIZE 13
+byte SENSOR_PIN_ARRAY[SENSOR_ARRAY_SIZE] = 
+    {SENSOR_ARRAY_1, SENSOR_ARRAY_2, SENSOR_ARRAY_3, SENSOR_ARRAY_4, SENSOR_ARRAY_5, SENSOR_ARRAY_6, SENSOR_ARRAY_7, SENSOR_ARRAY_8, SENSOR_ARRAY_9, SENSOR_ARRAY_10, SENSOR_ARRAY_11, SENSOR_ARRAY_12, SENSOR_ARRAY_13};
+
 //i2c addresses
 #define SDA_PIN 20
 #define SCL_PIN 21
@@ -39,20 +43,44 @@
 #define _I2C_ADDRESS 0x08
 
 //settings
-
-float speed = 0.5;
+float speed = 1;
 float kp = 0.5;
 float ki = 0.5;
 float kd = 0.5;
-String green_color = "1,1,1";
-String white_color = "1,1,1";
+//rgb colors 
+byte greenColor[3] = {0, 255, 0};
+byte whiteColor[3] = {255, 0, 0};
+byte blackColor[3] = {0, 0, 255};
 
 
 //variables
 bool can_detected = false;
 float can_distance = 0;
 
+//functions
+
+void setPinModes(){
+    for (int i = 0; i < SENSOR_ARRAY_SIZE; i++){
+        pinMode(SENSOR_PIN_ARRAY[i], INPUT);
+    }
+}
+
+void initI2C(){
+    Wire.begin();
+}
+
+void initOLED(){
+    Wire.beginTransmission(OLED_I2C_ADDRESS);
+    Wire.write(0x00);
+    Wire.endTransmission();
+}
+
+
 void setup() {
+    Serial.begin(9600);
+    initI2C();
+    setPinModes();
+    initOLED();
 
 }
 
