@@ -2,6 +2,8 @@
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
+#include <QTRSensors.h>
+#include <DFRobot_I2C_Multiplexer.h>
 
 //pins
     //motor
@@ -14,6 +16,9 @@
     //sensors
 #define ULTRASONIC_TRIG 2
 #define ULTRASONIC_ECHO 4
+#define CALIBRATION_SWITCH 5
+#define PROGRAM_SWITCH 6
+#define SETTINGS_SWITCH 7
         //sensor array
 #define SENSOR_ARRAY_1 0
 #define SENSOR_ARRAY_2 1
@@ -30,13 +35,16 @@
 #define SENSOR_ARRAY_13 12
 
 #define SENSOR_ARRAY_SIZE 13
+#define EMITTER_PIN 34
+
 byte SENSOR_PIN_ARRAY[SENSOR_ARRAY_SIZE] = 
     {SENSOR_ARRAY_1, SENSOR_ARRAY_2, SENSOR_ARRAY_3, SENSOR_ARRAY_4, SENSOR_ARRAY_5, SENSOR_ARRAY_6, SENSOR_ARRAY_7, SENSOR_ARRAY_8, SENSOR_ARRAY_9, SENSOR_ARRAY_10, SENSOR_ARRAY_11, SENSOR_ARRAY_12, SENSOR_ARRAY_13};
 
 //i2c addresses
 #define SDA_PIN 20
 #define SCL_PIN 21
-#define OLED_I2C_ADDRESS 0x04
+#define OLED_1_I2C_ADDRESS 0x04
+#define OLED_2_I2C_ADDRESS 0x05
 #define RGB_I2C_ADDRESS 0x05
 #define TOF_I2C_ADDRESS 0x06
 #define MULTIPLEXER_I2C_ADDRESS 0x07
@@ -47,6 +55,8 @@ float speed = 1;
 float kp = 0.5;
 float ki = 0.5;
 float kd = 0.5;
+float samplesPerRead = 4;
+float recommendedCalibrationTime = 0.5;
 //rgb colors 
 byte greenColor[3] = {0, 255, 0};
 byte whiteColor[3] = {255, 0, 0};
@@ -69,10 +79,12 @@ void initI2C(){
     Wire.begin();
 }
 
-void initOLED(){
+void initOLED(display1_I2C, display2_I2C, brightness, contrast){
     Wire.beginTransmission(OLED_I2C_ADDRESS);
     Wire.write(0x00);
     Wire.endTransmission();
+    //calibration display stuff
+
 }
 
 
@@ -81,7 +93,21 @@ void setup() {
     initI2C();
     setPinModes();
     initOLED();
+     
+}
 
+void calibrateSensor(){
+    qtra.calibrate();
+}
+
+void calibrateSensorsWhile(switchPin, calibrationDisplayPin){
+    calibrationTimer = millis();
+    calibrations = 0;
+    while(digitalRead(switchPin) == HIGH){
+        calibrateSensor();
+        calibrations++;
+        delay(10);
+    }
 }
 
 void loop() {
