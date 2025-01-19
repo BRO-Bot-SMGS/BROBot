@@ -45,17 +45,17 @@ byte SENSOR_PIN_ARRAY[SENSOR_ARRAY_SIZE] =
 //i2c addresses
 #define SDA_PIN 20
 #define SCL_PIN 21
-#define OLED_1_I2C_ADDRESS 0x04
-#define OLED_2_I2C_ADDRESS 0x05
+#define OLED_1_I2C_ADDRESS 0x78 // or 0x7a
+#define OLED_2_I2C_ADDRESS 0x78 // or 0x7a
 #define RGB_I2C_ADDRESS 0x05
 #define TOF_I2C_ADDRESS 0x06
-#define MULTIPLEXER_I2C_ADDRESS 0x07
+#define MULTIPLEXER_I2C_ADDRESS 0x70
 #define _I2C_ADDRESS 0x08
 
-#define OLED_1_I2C_PORT 1
+#define OLED_1_I2C_PORT 0
 #define OLED_2_I2C_PORT 2
 #define RGB_I2C_PORT 3
-#define TOF_I2C_PORT 4
+#define TOF_I2C_PORT 6
 
 
 //settings
@@ -78,6 +78,8 @@ byte blackColor[3] = {0, 0, 255};
 //variables
 bool can_detected = false;
 float can_distance = 0;
+unsigned int calibratedMinimumOn[SensorCount];
+unsigned int calibratedMaximumOn[SensorCount];
 
 //global setup
     // multiplexer setup
@@ -150,9 +152,31 @@ void initDisplays(int display1_I2Cport, int display2_I2Cport, int textSize, int 
 
 }
 
+void displayTest(int displayNumber){
+    display[displayNumber].clearDisplay();
+    display[displayNumber].setTextSize(1);
+    display[displayNumber].setTextColor(SSD1306_WHITE);
+    display[displayNumber].setCursor(0, 0);
+    display[displayNumber].println(F("Hellllo, World!"));
+    display[displayNumber].display();
+}
 
 void calibrateSensor(){
     qtra.calibrate();
+}
+
+void printCalibrationResults(){
+    Serial.println("Calibrated Minimum Values:");
+    for (int i = 0; i < SensorCount; i++){
+        Serial.print(calibratedMinimumOn[i]);
+    }
+    Serial.println();
+
+    Serial.println("Calibrated Maximum Values:");
+    for (int i = 0; i < SensorCount; i++){
+        Serial.print(calibratedMaximumOn[i]);
+    }
+    Serial.println();
 }
 
 void calibrateSensorsWhile(int switchPin, int calibrationDisplayPin){
@@ -184,8 +208,10 @@ void initSensorArray(int emitterPin){
     qtra.setEmitterPin(emitterPin);
 }
 
-
-
+void selectMultiplexerPort(int port){
+    multiplexer.selectPort(port);
+    Serial.println("Selected port " + String(port) + " on multiplexer");
+}
 
 
 
@@ -193,18 +219,21 @@ void initSensorArray(int emitterPin){
 
 void setup() {
     Serial.begin(9600);
+    Wire.begin();
+    multiplexer.begin();
+    selectMultiplexerPort(2);
     setPinModes();
     initDisplays(OLED_1_I2C_ADDRESS, OLED_2_I2C_ADDRESS, 1, brightness, contrast, OLED_DISPLAY_WIDTH, OLED_DISPLAY_HEIGHT);
-
+    displayTest(0);
 }
 
 
 void loop() {
-    int calibrations = 0;
-    int calibrationTimer = 0;
-    if(digitalRead(CALIBRATION_SWITCH) == HIGH){
-        calibrateSensorsWhile(CALIBRATION_SWITCH, calibrationTimer);
-        updateCalibrationDisplay(calibrations, calibrationTimer, CALIBRATION_SWITCH);
-    }
-    delay(10);
+    // int calibrations = 0;
+    // int calibrationTimer = 0;
+    // if(digitalRead(CALIBRATION_SWITCH) == HIGH){
+    //     calibrateSensorsWhile(CALIBRATION_SWITCH, calibrationTimer);
+    //     updateCalibrationDisplay(calibrations, calibrationTimer, CALIBRATION_SWITCH);
+    // }
+    // delay(10);
 }
