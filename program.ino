@@ -3,7 +3,7 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 #include <QTRSensors.h>
-#include <DFRobot_I2C_Multiplexer.h>
+// #include <DFRobot_I2C_Multiplexer.h>
 
 //pins
     //motor
@@ -52,8 +52,8 @@ byte SENSOR_PIN_ARRAY[SENSOR_ARRAY_SIZE] =
 #define MULTIPLEXER_I2C_ADDRESS 0x70
 #define _I2C_ADDRESS 0x08
 
-#define OLED_1_I2C_PORT 0
-#define OLED_2_I2C_PORT 2
+#define OLED_1_MULTIPLEXER_PORT 0
+#define OLED_2_MULTIPLEXER_PORT 2
 #define RGB_I2C_PORT 3
 #define TOF_I2C_PORT 6
 
@@ -83,7 +83,7 @@ unsigned int calibratedMaximumOn[SensorCount];
 
 //global setup
     // multiplexer setup
-DFRobot_I2C_Multiplexer multiplexer(&Wire, MULTIPLEXER_I2C_ADDRESS);
+
     // sensor array setup
     // For QTRSensorsAnalog
 QTRSensors qtra;
@@ -127,38 +127,95 @@ void resetDefaults(){
     digitalWrite(EMITTER_PIN, HIGH);
 }
 
-void initOLED(int displayNumber, int display_I2C, int textSize, int displayWidth, int displayHeight){
+void initOLED(int displayNumber, int display_I2C, int textSize, int displayWidth, int displayHeight, int multiplexerPort){
     String displayInstance = displayNumber + "display";
     Serial.println("OLED " + String(displayNumber) + " init started");
-    Wire.beginTransmission(display_I2C);
+
     if(!display[displayNumber].begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
         Serial.println(F("SSD1306 allocation failed"));
+        return; // Exit function if initialization fails
     }
-    display[displayNumber].clearDisplay(); // clear the display
-    Serial.println("OLED " + String(displayNumber) + " init complete");
 
+    display[displayNumber].clearDisplay(); // clear the display
+
+    selectMultiplexerPort(multiplexerPort);
     display[displayNumber].clearDisplay(); // clear the display
     display[displayNumber].setTextSize(textSize); // set text size
     display[displayNumber].setTextColor(SSD1306_WHITE); // set text color (won't actually change anything)
     display[displayNumber].setCursor(0, 0); // set cursor position
+
+    Serial.println("OLED " + String(displayNumber) + " init complete");
 }
 
-void initDisplays(int display1_I2Cport, int display2_I2Cport, int textSize, int brightness, int contrast, int displayWidth, int displayHeight){
-    initOLED(0, display1_I2Cport, textSize, displayWidth, displayHeight);
-    initOLED(1, display2_I2Cport, textSize, displayWidth, displayHeight);
-    Wire.write(0x00);
-    Wire.endTransmission();
-    //calibration display stuff
-
+void initDisplays(int display1_I2Cport, int display2_I2Cport, int textSize, int brightness, int contrast, int displayWidth, int displayHeight, int multiplexerPort1, int multiplexerPort2){
+    initOLED(0, display1_I2Cport, textSize, displayWidth, displayHeight, multiplexerPort1);
+    initOLED(1, display2_I2Cport, textSize, displayWidth, displayHeight, multiplexerPort2);
+    displayTest();
+    // delay(2000);
+    // displaySensorData();
+    // displayCalibrationData();
+    // calibration display stuff
 }
 
-void displayTest(int displayNumber){
+void displaySensorData(int displayNumber){
     display[displayNumber].clearDisplay();
     display[displayNumber].setTextSize(1);
     display[displayNumber].setTextColor(SSD1306_WHITE);
     display[displayNumber].setCursor(0, 0);
-    display[displayNumber].println(F("Hellllo, World!"));
+    display[displayNumber].println(F("Sensor Data:"));
     display[displayNumber].display();
+}
+
+void displayCalibrationData(int displayNumber){
+    display[displayNumber].clearDisplay();
+    display[displayNumber].setTextSize(1);
+    display[displayNumber].setTextColor(SSD1306_WHITE);
+    display[displayNumber].setCursor(0, 0);
+    display[displayNumber].println(F("Calibration Data:"));
+    display[displayNumber].setCursor(0, 10);
+    display[displayNumber].println(F("Min: "));
+    display[displayNumber].setCursor(0, 20);
+    display[displayNumber].println(F("Max: "));
+    display[displayNumber].display();
+}
+
+void displayTest(){
+    //display 0
+    selectMultiplexerPort(OLED_1_MULTIPLEXER_PORT);
+    delay(40);
+    display[0].clearDisplay();
+    display[0].setTextColor(SSD1306_WHITE);
+    display[0].setTextSize(2);
+    display[0].setCursor(0, 0);
+    display[0].println(F("Loading..."));
+    display[0].setTextSize(1);
+    display[0].setCursor(0, 16);
+    display[0].println(F("Please Wait"));
+    display[0].setTextSize(1);
+    display[0].setCursor(0, 54);
+    display[0].println(F("Display 0"));
+    display[0].display();
+    Serial.println("Display 0 test displayed");
+
+    delay(20);
+
+    //display 1
+    selectMultiplexerPort(OLED_2_MULTIPLEXER_PORT);
+    delay(40);
+    display[1].clearDisplay();
+    display[1].setTextColor(SSD1306_WHITE);
+    display[1].setTextSize(2);
+    display[1].setCursor(0, 0);
+    display[1].println(F("BRObotMini"));
+    display[1].setTextSize(2);
+    display[1].setCursor(0, 20);
+    display[1].println(F("Billy and Rufus"));
+    display[1].display();
+    display[1].setTextSize(1);
+    display[1].setCursor(0, 54);
+    display[1].println(F("Display 1"));
+    display[1].display();
+    Serial.println("Display 1 test displayed");
 }
 
 void calibrateSensor(){
@@ -179,16 +236,21 @@ void printCalibrationResults(){
     Serial.println();
 }
 
-void calibrateSensorsWhile(int switchPin, int calibrationDisplayPin){
-    long unsigned int calibrationTimer = millis();
-    int calibrations = 0;
-    while(digitalRead(switchPin) == HIGH){
-        calibrateSensor();
-        calibrations++;
-        delay(10);
-    }
-    return calibrations, calibrationTimer;
-}
+// struct CalibrationData {
+//     int calibrations;
+//     unsigned long calibrationTimer;
+// };
+
+// CalibrationData calibrateSensorsWhile(int switchPin, int calibrationDisplayPin){
+//     long unsigned int calibrationTimer = millis();
+//     int calibrations = 0;
+//     while(digitalRead(switchPin) == HIGH){
+//         calibrateSensor();
+//         calibrations++;
+//         delay(10);
+//     }
+//     return calibrations, calibrationTimer;
+// }
 
 void updateCalibrationDisplay(int calibrations, int calibrationTimer, bool switchStatus){
     display[1].clearDisplay();
@@ -208,32 +270,37 @@ void initSensorArray(int emitterPin){
     qtra.setEmitterPin(emitterPin);
 }
 
-void selectMultiplexerPort(int port){
-    multiplexer.selectPort(port);
+void selectMultiplexerPort(int port) {
+    if (port > 7) return;  // Multiplexer has 8 channels (0-7)
+    
+    Wire.beginTransmission(MULTIPLEXER_I2C_ADDRESS);
+    Wire.write(1 << port);  // Send the channel bitmask
+    Wire.endTransmission();
+
     Serial.println("Selected port " + String(port) + " on multiplexer");
 }
 
 
-
-
-
 void setup() {
     Serial.begin(9600);
+    Serial.println("Power on, starting setup - wait 0.5 seconds");
+    delay(200);
     Wire.begin();
-    multiplexer.begin();
-    selectMultiplexerPort(2);
     setPinModes();
-    initDisplays(OLED_1_I2C_ADDRESS, OLED_2_I2C_ADDRESS, 1, brightness, contrast, OLED_DISPLAY_WIDTH, OLED_DISPLAY_HEIGHT);
-    displayTest(0);
+
+
+Serial.println("Selecting OLED 1 Port...");
+selectMultiplexerPort(OLED_1_MULTIPLEXER_PORT);
+delay(30);
+Serial.println("Selecting OLED 2 Port...");
+selectMultiplexerPort(OLED_2_MULTIPLEXER_PORT);
+delay(30);
+
+
+    initDisplays(OLED_1_I2C_ADDRESS, OLED_2_I2C_ADDRESS, 1, brightness, contrast, OLED_DISPLAY_WIDTH, OLED_DISPLAY_HEIGHT, OLED_1_MULTIPLEXER_PORT, OLED_2_MULTIPLEXER_PORT);
 }
 
 
 void loop() {
-    // int calibrations = 0;
-    // int calibrationTimer = 0;
-    // if(digitalRead(CALIBRATION_SWITCH) == HIGH){
-    //     calibrateSensorsWhile(CALIBRATION_SWITCH, calibrationTimer);
-    //     updateCalibrationDisplay(calibrations, calibrationTimer, CALIBRATION_SWITCH);
-    // }
-    // delay(10);
+
 }
