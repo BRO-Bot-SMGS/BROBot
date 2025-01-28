@@ -11,6 +11,10 @@
 // #include <DFRobot_I2C_Multiplexer.h>
 
 //pins
+    // led
+#define LED_RED_PIN 44 //pwm pin
+#define LED_GREEN_PIN 45 //pwm pin
+#define LED_BLUE_PIN 46 //pwm pin
     //motor
 #define MOTOR1_PWM 3
 #define MOTOR1_DIR 12
@@ -21,29 +25,26 @@
     //sensors
 #define ULTRASONIC_TRIG 2
 #define ULTRASONIC_ECHO 4
-#define CALIBRATION_SWITCH 24
-#define PROGRAM_SWITCH 32
-#define SETTINGS_SWITCH 36
-// ultrasonic sensor
-#define ULTRASONIC_TRIG 2
-#define ULTRASONIC_ECHO 4
-byte triggerPin = 21;
-byte echoCount = 2;
-byte* echoPins = new byte[echoCount] { 12, 13 };
+#define CALIBRATION_SWITCH 2 //interupt pin
+#define PROGRAM_SWITCH 18 //interupt pin
+#define SETTINGS_SWITCH 19 //interupt pin - still available 20, 21
+        // ultrasonic sensor
+#define ULTRASONIC_TRIG 8
+#define ULTRASONIC_ECHO 9
         //sensor array
-#define SENSOR_ARRAY_1 0
-#define SENSOR_ARRAY_2 1
-#define SENSOR_ARRAY_3 2
-#define SENSOR_ARRAY_4 3
-#define SENSOR_ARRAY_5 4
-#define SENSOR_ARRAY_6 5
-#define SENSOR_ARRAY_7 6
-#define SENSOR_ARRAY_8 7
-#define SENSOR_ARRAY_9 8
-#define SENSOR_ARRAY_10 9
-#define SENSOR_ARRAY_11 10
-#define SENSOR_ARRAY_12 11
-#define SENSOR_ARRAY_13 12
+#define SENSOR_ARRAY_1 A0
+#define SENSOR_ARRAY_2 A1
+#define SENSOR_ARRAY_3 A2
+#define SENSOR_ARRAY_4 A3
+#define SENSOR_ARRAY_5 A4
+#define SENSOR_ARRAY_6 A5
+#define SENSOR_ARRAY_7 A6
+#define SENSOR_ARRAY_8 A7
+#define SENSOR_ARRAY_9 A8
+#define SENSOR_ARRAY_10 A9
+#define SENSOR_ARRAY_11 A10
+#define SENSOR_ARRAY_12 A11
+#define SENSOR_ARRAY_13 A12
 
 #define SENSOR_ARRAY_SIZE 13
 #define EMITTER_PIN 34
@@ -53,7 +54,12 @@ const uint8_t sensorCount = 13;
 byte SENSOR_PIN_ARRAY[SENSOR_ARRAY_SIZE] = 
     {SENSOR_ARRAY_1, SENSOR_ARRAY_2, SENSOR_ARRAY_3, SENSOR_ARRAY_4, SENSOR_ARRAY_5, SENSOR_ARRAY_6, SENSOR_ARRAY_7, SENSOR_ARRAY_8, SENSOR_ARRAY_9, SENSOR_ARRAY_10, SENSOR_ARRAY_11, SENSOR_ARRAY_12, SENSOR_ARRAY_13};
 
-const uint8_t sensorPins[sensorCount] = {A0, A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11, A12};
+const uint8_t sensorPins[sensorCount] = {
+    SENSOR_ARRAY_1, SENSOR_ARRAY_2, SENSOR_ARRAY_3, SENSOR_ARRAY_4,
+    SENSOR_ARRAY_5, SENSOR_ARRAY_6, SENSOR_ARRAY_7, SENSOR_ARRAY_8,
+    SENSOR_ARRAY_9, SENSOR_ARRAY_10, SENSOR_ARRAY_11, SENSOR_ARRAY_12,
+    SENSOR_ARRAY_13
+};
 
 //i2c addresses
 #define SDA_PIN 20
@@ -127,19 +133,42 @@ int errorCode = 0;
 int speed = 0;
 bool programRunning = false;
 bool greenZoneDetected = false;
+int lineBrightnessMinimum = 100;
+bool programDisplayAlertStatus = false;
+String programDisplayAlert = "Alert Test";
+bool lineLost = false;
+int sensorValues[SENSOR_ARRAY_SIZE];
 //eeprom addresses
 #define lastCalibrationAmountAddress 101
 #define lastCalibrationTimeAddress 102
 #define lastCalibrationDataAddress 103
+//debounce settings (when bounce2 isnt available beacse on interupt)
+unsigned long debounceDelay = 50; // the debounce time; increase if the output flickers
+    //calibration switch
+volatile unsigned long calibrationSwitchLastTimeButtonReleased = millis();
+volatile bool calibrationSwitchReleased = false;
+    //program switch
+volatile unsigned long programSwitchLastTimeButtonReleased = millis();
+volatile bool programSwitchReleased = false;
+    //settings switch
+
+
 
 //global setup
     // multiplexer setup
 
     // sensor array setup
     // For QTRSensorsAnalog
+// QTRSensors qtra;
 QTRSensors qtra;
-// QTRSensors qtra((unsigned char[]) {SENSOR_ARRAY_1, SENSOR_ARRAY_2, SENSOR_ARRAY_3, SENSOR_ARRAY_4, SENSOR_ARRAY_5, SENSOR_ARRAY_6, SENSOR_ARRAY_7, SENSOR_ARRAY_8, SENSOR_ARRAY_9, SENSOR_ARRAY_10, SENSOR_ARRAY_11, SENSOR_ARRAY_12, SENSOR_ARRAY_13}, SENSOR_ARRAY_SIZE, EMITTER_PIN);
-    // OLED display setup
+// QTRSensorsAnalog qtra(sensorPins, sensorCount, EMITTER_PIN, timeout); 
+// QTRSensors qtra((unsigned char[]) {
+//     SENSOR_ARRAY_1, SENSOR_ARRAY_2, SENSOR_ARRAY_3, SENSOR_ARRAY_4, SENSOR_ARRAY_5,
+//     SENSOR_ARRAY_6, SENSOR_ARRAY_7, SENSOR_ARRAY_8, SENSOR_ARRAY_9, SENSOR_ARRAY_10,
+//     SENSOR_ARRAY_11, SENSOR_ARRAY_12, SENSOR_ARRAY_13
+// }, SENSOR_ARRAY_SIZE, EMITTER_PIN);
+
+// OLED display setup
 Adafruit_SSD1306 display[2] = {
     Adafruit_SSD1306(OLED_DISPLAY_WIDTH, OLED_DISPLAY_HEIGHT, &Wire, -1), //display 1 - use it with display[0]
     Adafruit_SSD1306(OLED_DISPLAY_WIDTH, OLED_DISPLAY_HEIGHT, &Wire, -1) //display 2 - use it with display[1]
@@ -151,12 +180,11 @@ Bounce settingsSwitch = Bounce();
 //functions
 
 
-
 void setPinModes(){
     // sensor array
-    for (int i = 0; i < SENSOR_ARRAY_SIZE; i++){
-        pinMode(SENSOR_PIN_ARRAY[i], INPUT);
-        }
+    for (int i = 0; i < SENSOR_ARRAY_SIZE; i++) {
+        pinMode(sensorPins[i], INPUT); // Use sensorPins array here
+    }
     // toggle switches
     pinMode(CALIBRATION_SWITCH, INPUT_PULLUP);
     pinMode(PROGRAM_SWITCH, INPUT_PULLUP);
@@ -174,6 +202,19 @@ void setPinModes(){
     pinMode(ULTRASONIC_TRIG, OUTPUT);
     pinMode(ULTRASONIC_ECHO, INPUT);
     pinMode(EMITTER_PIN, OUTPUT);
+    //leds
+    pinMode(LED_RED_PIN, OUTPUT);
+    pinMode(LED_GREEN_PIN, OUTPUT);
+    pinMode(LED_BLUE_PIN, OUTPUT);
+    attachInterrupt(digitalPinToInterrupt(CALIBRATION_SWITCH), calibrationSwitchRising, RISING);
+    attachInterrupt(digitalPinToInterrupt(CALIBRATION_SWITCH), calibrationSwitchFalling, FALLING);
+}
+
+void initSensorArray(int emitterPin) {
+    qtra.setTypeAnalog();
+    qtra.setSensorPins(sensorPins, sensorCount); // Use sensorPins array
+    qtra.setEmitterPin(emitterPin);
+    Serial.println("Sensor array initialized");
 }
 
 void buttonBounceSetup(){
@@ -214,7 +255,11 @@ int calculateUltrasonic(int trigPin, int echoPin) {
     return distance;
 }
 
-
+void setLEDColor(int red, int green, int blue) {
+    analogWrite(LED_RED_PIN, red);
+    analogWrite(LED_GREEN_PIN, green);
+    analogWrite(LED_BLUE_PIN, blue);
+}
 
 void initOLED(int displayNumber, int display_I2C, int textSize, int displayWidth, int displayHeight, int multiplexerPort){
     String displayInstance = displayNumber + "display";
@@ -271,6 +316,52 @@ void displayCalibrationData(int displayNumber){
     display[displayNumber].setCursor(0, 55);
     display[displayNumber].println("Max: " + String(calibratedMaximumOn[0]));
     display[displayNumber].display();
+}
+
+void displayProgramData(){
+    selectMultiplexerPort(OLED_1_MULTIPLEXER_PORT);
+    delay(20);
+    display[0].clearDisplay();
+    if (programDisplayAlertStatus = true) {
+        display[0].drawRoundRect(0, 15, 22, 30, 5, WHITE);
+        display[0].setTextSize(1);
+        display[0].setCursor(15, 15);
+        display[0].println("255");
+        display[0].display();
+    }
+    // left wheel render
+    display[0].setTextSize(2);
+    display[0].setCursor(15, 15);
+    display[0].println("L");
+
+    display[0].drawRoundRect(0, 30, 22, 30, 5, WHITE);
+    display[0].setTextSize(1);
+    display[0].setCursor(42, 10);
+    display[0].println("255");
+    display[0].display();
+
+    // right wheel render
+    display[0].setTextSize(1);
+    display[0].setCursor(15, 15);
+    display[0].println("255");
+
+    display[0].drawRoundRect(0, 15, 22, 30, 5, WHITE);
+    display[0].setTextSize(1);
+    display[0].setCursor(15, 15);
+    display[0].println("255");
+    display[0].display();
+
+}
+
+void alertProgramDataDisplay(String alert){
+    alert = programDisplayAlert;
+    programDisplayAlertStatus = true;
+    displayProgramData();
+}
+
+void clearAlertProgramDataDisplay(){
+    programDisplayAlertStatus = false;
+    displayProgramData();
 }
 
 void displayTest(){
@@ -335,7 +426,6 @@ void longTermMemoryStore(int address, int value){
     // EEPROM.write(address, value); // Write the value to the specified address **BE CAREFUL max 100k writes
     Serial.println("Stored " + String(value) + " at address " + String(address)); 
 }
-
 
 
 // motor stuff
@@ -404,13 +494,6 @@ void updateDisplayStatus(String status) {
     displayCalibrationData(1);
 }
 
-void initSensorArray(int emitterPin){
-    qtra.setTypeAnalog();
-    qtra.setSensorPins((const uint8_t[]){A0, A1, A2, A3, A4, A5}, sensorCount);
-    qtra.setEmitterPin(emitterPin);
-    Serial.println("Sensor array initialized");
-}
-
 void selectMultiplexerPort(int port) {
     if (port > 7) return;  // Multiplexer has 8 channels (0-7)
     
@@ -419,6 +502,19 @@ void selectMultiplexerPort(int port) {
     Wire.endTransmission();
 
     Serial.println("Selected port " + String(port) + " on multiplexer");
+}
+
+void testForLostLine() {
+    for (int i = 0; i < NUM_SENSORS; i++) {
+        if (sensorValues[i] < lineBrightnessMinimum) { // Adjust threshold based on sensor readings
+            lineLost=true;
+            stopMotors();
+            updateDisplayStatus("Lost Line");
+        }
+        else {
+            lineLost=false;
+        }
+    }
 }
 
 void loadDefaultDisplay() {
@@ -453,6 +549,48 @@ void loadDefaultDisplay() {
     displayCalibrationData(1);
 }
 
+void calibrationSwitchRising() {
+    unsigned long timeNow = millis();
+    if (timeNow - calibrationSwitchLastTimeButtonReleased > debounceDelay) {
+        calibrationSwitchLastTimeButtonReleased = timeNow;
+        calibrationSwitchReleased = true;
+    }
+    calibrationSwitchState = true;
+    selectMultiplexerPort(OLED_2_MULTIPLEXER_PORT);
+    Serial.println("Calibration switch switched to HIGH, calibrating...");
+    calibrationStartTime = millis();
+    calibrationAmount = 0;
+    robotStatus = "Calibratng";
+    calibrationStatus = "Calibrating line array...";
+    setLEDColor(200, 255, 10);
+}
+
+void calibrationSwitchFalling(){
+    calibrationSwitchState = false;
+    selectMultiplexerPort(OLED_2_MULTIPLEXER_PORT);
+    calibrationTime = millis() - calibrationStartTime;
+    robotStatus = "UpdCalData";
+    calibrationStatus = "Saving calibration data to EEPROM";
+    displayCalibrationData(1);
+    Serial.println("Calibration switch switched to LOW, stopping calibration...");
+    Serial.println("Saving calibration data to EEPROM...");
+    for (int i = 0; i < sensorCount; i++) { // store calibration data to EEPROM
+        longTermMemoryStore(i, calibratedMinimumOn[i]);
+        longTermMemoryStore(i + sensorCount, calibratedMaximumOn[i]);
+    }
+    longTermMemoryStore(lastCalibrationAmountAddress, calibrationAmount);
+    longTermMemoryStore(lastCalibrationTimeAddress, (millis() - calibrationStartTime));
+    Serial.println("Calibration data saved to EEPROM");
+    Serial.println("Calibration data:");
+    Serial.println("Updating display with calibration data...");
+    robotStatus = "Idle";
+    calibrationStatus = "Calibrated this session (:";
+    displayCalibrationData(1);
+    Serial.println("Display updated with calibration data");
+    Serial.println("Calibration complete");
+    setLEDColor(0, 0, 0);
+}
+
 void setup() {
     Serial.begin(serialSpeed);
     Serial.println("");
@@ -462,6 +600,7 @@ void setup() {
     setPinModes();
     retrieveEEPROMvalues();
     initMotors();
+    stopMotors();
 
 Serial.println("Selecting OLED 1 Port...");
 selectMultiplexerPort(OLED_1_MULTIPLEXER_PORT);
@@ -489,41 +628,43 @@ void loop() {
     calibrationSwitch.update();
     bool calibrationSwitchState = calibrationSwitch.read() == HIGH;
 
-    if (calibrationSwitch.fell()) { // if the calibration switch is turned off do this once
-        calibrationSwitchState = false;
-        selectMultiplexerPort(OLED_2_MULTIPLEXER_PORT);
-        calibrationTime = millis() - calibrationStartTime;
-        robotStatus = "UpdCalData";
-        calibrationStatus = "Saving calibration data to EEPROM";
-        displayCalibrationData(1);
-        Serial.println("Calibration switch switched to LOW, stopping calibration...");
-        Serial.println("Saving calibration data to EEPROM...");
-        for (int i = 0; i < sensorCount; i++) { // store calibration data to EEPROM
-            longTermMemoryStore(i, calibratedMinimumOn[i]);
-            longTermMemoryStore(i + sensorCount, calibratedMaximumOn[i]);
-        }
-        longTermMemoryStore(lastCalibrationAmountAddress, calibrationAmount);
-        longTermMemoryStore(lastCalibrationTimeAddress, (millis() - calibrationStartTime));
-        Serial.println("Calibration data saved to EEPROM");
-        Serial.println("Calibration data:");
-        Serial.println("Updating display with calibration data...");
-        robotStatus = "Idle";
-        calibrationStatus = "Calibrated this session (:";
-        displayCalibrationData(1);
-        Serial.println("Display updated with calibration data");
-        Serial.println("Calibration complete");
-    }
+    // if (calibrationSwitch.fell()) { // if the calibration switch is turned off do this once
+    //     calibrationSwitchState = false;
+    //     selectMultiplexerPort(OLED_2_MULTIPLEXER_PORT);
+    //     calibrationTime = millis() - calibrationStartTime;
+    //     robotStatus = "UpdCalData";
+    //     calibrationStatus = "Saving calibration data to EEPROM";
+    //     displayCalibrationData(1);
+    //     Serial.println("Calibration switch switched to LOW, stopping calibration...");
+    //     Serial.println("Saving calibration data to EEPROM...");
+    //     for (int i = 0; i < sensorCount; i++) { // store calibration data to EEPROM
+    //         longTermMemoryStore(i, calibratedMinimumOn[i]);
+    //         longTermMemoryStore(i + sensorCount, calibratedMaximumOn[i]);
+    //     }
+    //     longTermMemoryStore(lastCalibrationAmountAddress, calibrationAmount);
+    //     longTermMemoryStore(lastCalibrationTimeAddress, (millis() - calibrationStartTime));
+    //     Serial.println("Calibration data saved to EEPROM");
+    //     Serial.println("Calibration data:");
+    //     Serial.println("Updating display with calibration data...");
+    //     robotStatus = "Idle";
+    //     calibrationStatus = "Calibrated this session (:";
+    //     displayCalibrationData(1);
+    //     Serial.println("Display updated with calibration data");
+    //     Serial.println("Calibration complete");
+    //     setLEDColor(0, 0, 0);
+    // }
 
-    if (calibrationSwitch.rose()) { // if the calibration switch is turned on do this once
-        calibrationSwitchState = true;
-        selectMultiplexerPort(OLED_2_MULTIPLEXER_PORT);
-        Serial.println("Calibration switch switched to HIGH, calibrating...");
-        calibrationStartTime = millis();
-        calibrationAmount = 0;
-        robotStatus = "Calibratng";
-        calibrationStatus = "Calibrating line array...";
-    }
-    if (calibrationSwitchState) { // while the calibration switch is on do this (loop)
+    // if (calibrationSwitch.rose()) { // if the calibration switch is turned on do this once
+    //     calibrationSwitchState = true;
+    //     selectMultiplexerPort(OLED_2_MULTIPLEXER_PORT);
+    //     Serial.println("Calibration switch switched to HIGH, calibrating...");
+    //     calibrationStartTime = millis();
+    //     calibrationAmount = 0;
+    //     robotStatus = "Calibratng";
+    //     calibrationStatus = "Calibrating line array...";
+    //     setLEDColor(200, 255, 10);
+    // }
+    if (calibrationSwitchState) {
         calibrateSensor();
         displayCalibrationData(1);
         delay(15);
@@ -531,6 +672,13 @@ void loop() {
 
     // line following
     
+    // detect lost line
+    // testForLostLine();
+
+    // if (lineLost) {
+    //     setMotorSpeedsAndBrakes(100, 100, 0, 0);
+    // }
+
     // update calibration switch
     programSwitch.update();
     bool programSwitchState = programSwitch.read() == HIGH;
@@ -540,12 +688,14 @@ void loop() {
         stopMotors();
         updateDisplayStatus("Idle");
         programRunning = false;
+        loadDefaultDisplay();
     }
 
     if (programSwitch.rose()) { // if the program switch is turned on do this once
         updateDisplayStatus("Runng Prog");
-        setMotorBrakes(0, 0);
+        setMotorBrakes(0, 0); // unlock brakes
         programRunning = true;
+        displayProgramData();
     }
 
     if (programSwitchState) { // while the program switch is on do this (loop)
@@ -596,7 +746,7 @@ void loop() {
     
     // look for obstacles
     if (programRunning) {
-        can_distance = calculateUltrasonic(ULTRASONIC_TRIG, ULTRASONIC_ECHO);
+        // can_distance = calculateUltrasonic(ULTRASONIC_TRIG, ULTRASONIC_ECHO);
         stopMotors();
         }
         else {

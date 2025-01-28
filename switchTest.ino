@@ -1,4 +1,4 @@
-#define SWITCH_PIN 24  // Pin where the toggle switch is connected
+#define SWITCH_PIN 2  // Pin where the toggle switch is connected
 
 void setup() {
     pinMode(SWITCH_PIN, INPUT_PULLUP);  // Enable internal pull-up resistor
