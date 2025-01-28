@@ -28,9 +28,12 @@
 #define CALIBRATION_SWITCH 2 //interupt pin
 #define PROGRAM_SWITCH 18 //interupt pin
 #define SETTINGS_SWITCH 19 //interupt pin - still available 20, 21
-        // ultrasonic sensor
-#define ULTRASONIC_TRIG 8
-#define ULTRASONIC_ECHO 9
+// ultrasonic sensor
+#define ULTRASONIC_TRIG 2
+#define ULTRASONIC_ECHO 4
+byte triggerPin = 21;
+byte echoCount = 2;
+byte* echoPins = new byte[echoCount] { 12, 13 };
         //sensor array
 #define SENSOR_ARRAY_1 A0
 #define SENSOR_ARRAY_2 A1
@@ -142,17 +145,6 @@ int sensorValues[SENSOR_ARRAY_SIZE];
 #define lastCalibrationAmountAddress 101
 #define lastCalibrationTimeAddress 102
 #define lastCalibrationDataAddress 103
-//debounce settings (when bounce2 isnt available beacse on interupt)
-unsigned long debounceDelay = 50; // the debounce time; increase if the output flickers
-    //calibration switch
-volatile unsigned long calibrationSwitchLastTimeButtonReleased = millis();
-volatile bool calibrationSwitchReleased = false;
-    //program switch
-volatile unsigned long programSwitchLastTimeButtonReleased = millis();
-volatile bool programSwitchReleased = false;
-    //settings switch
-
-
 
 //global setup
     // multiplexer setup
@@ -206,8 +198,6 @@ void setPinModes(){
     pinMode(LED_RED_PIN, OUTPUT);
     pinMode(LED_GREEN_PIN, OUTPUT);
     pinMode(LED_BLUE_PIN, OUTPUT);
-    attachInterrupt(digitalPinToInterrupt(CALIBRATION_SWITCH), calibrationSwitchRising, RISING);
-    attachInterrupt(digitalPinToInterrupt(CALIBRATION_SWITCH), calibrationSwitchFalling, FALLING);
 }
 
 void initSensorArray(int emitterPin) {
@@ -549,48 +539,6 @@ void loadDefaultDisplay() {
     displayCalibrationData(1);
 }
 
-void calibrationSwitchRising() {
-    unsigned long timeNow = millis();
-    if (timeNow - calibrationSwitchLastTimeButtonReleased > debounceDelay) {
-        calibrationSwitchLastTimeButtonReleased = timeNow;
-        calibrationSwitchReleased = true;
-    }
-    calibrationSwitchState = true;
-    selectMultiplexerPort(OLED_2_MULTIPLEXER_PORT);
-    Serial.println("Calibration switch switched to HIGH, calibrating...");
-    calibrationStartTime = millis();
-    calibrationAmount = 0;
-    robotStatus = "Calibratng";
-    calibrationStatus = "Calibrating line array...";
-    setLEDColor(200, 255, 10);
-}
-
-void calibrationSwitchFalling(){
-    calibrationSwitchState = false;
-    selectMultiplexerPort(OLED_2_MULTIPLEXER_PORT);
-    calibrationTime = millis() - calibrationStartTime;
-    robotStatus = "UpdCalData";
-    calibrationStatus = "Saving calibration data to EEPROM";
-    displayCalibrationData(1);
-    Serial.println("Calibration switch switched to LOW, stopping calibration...");
-    Serial.println("Saving calibration data to EEPROM...");
-    for (int i = 0; i < sensorCount; i++) { // store calibration data to EEPROM
-        longTermMemoryStore(i, calibratedMinimumOn[i]);
-        longTermMemoryStore(i + sensorCount, calibratedMaximumOn[i]);
-    }
-    longTermMemoryStore(lastCalibrationAmountAddress, calibrationAmount);
-    longTermMemoryStore(lastCalibrationTimeAddress, (millis() - calibrationStartTime));
-    Serial.println("Calibration data saved to EEPROM");
-    Serial.println("Calibration data:");
-    Serial.println("Updating display with calibration data...");
-    robotStatus = "Idle";
-    calibrationStatus = "Calibrated this session (:";
-    displayCalibrationData(1);
-    Serial.println("Display updated with calibration data");
-    Serial.println("Calibration complete");
-    setLEDColor(0, 0, 0);
-}
-
 void setup() {
     Serial.begin(serialSpeed);
     Serial.println("");
@@ -628,42 +576,42 @@ void loop() {
     calibrationSwitch.update();
     bool calibrationSwitchState = calibrationSwitch.read() == HIGH;
 
-    // if (calibrationSwitch.fell()) { // if the calibration switch is turned off do this once
-    //     calibrationSwitchState = false;
-    //     selectMultiplexerPort(OLED_2_MULTIPLEXER_PORT);
-    //     calibrationTime = millis() - calibrationStartTime;
-    //     robotStatus = "UpdCalData";
-    //     calibrationStatus = "Saving calibration data to EEPROM";
-    //     displayCalibrationData(1);
-    //     Serial.println("Calibration switch switched to LOW, stopping calibration...");
-    //     Serial.println("Saving calibration data to EEPROM...");
-    //     for (int i = 0; i < sensorCount; i++) { // store calibration data to EEPROM
-    //         longTermMemoryStore(i, calibratedMinimumOn[i]);
-    //         longTermMemoryStore(i + sensorCount, calibratedMaximumOn[i]);
-    //     }
-    //     longTermMemoryStore(lastCalibrationAmountAddress, calibrationAmount);
-    //     longTermMemoryStore(lastCalibrationTimeAddress, (millis() - calibrationStartTime));
-    //     Serial.println("Calibration data saved to EEPROM");
-    //     Serial.println("Calibration data:");
-    //     Serial.println("Updating display with calibration data...");
-    //     robotStatus = "Idle";
-    //     calibrationStatus = "Calibrated this session (:";
-    //     displayCalibrationData(1);
-    //     Serial.println("Display updated with calibration data");
-    //     Serial.println("Calibration complete");
-    //     setLEDColor(0, 0, 0);
-    // }
+    if (calibrationSwitch.fell()) { // if the calibration switch is turned off do this once
+        calibrationSwitchState = false;
+        selectMultiplexerPort(OLED_2_MULTIPLEXER_PORT);
+        calibrationTime = millis() - calibrationStartTime;
+        robotStatus = "UpdCalData";
+        calibrationStatus = "Saving calibration data to EEPROM";
+        displayCalibrationData(1);
+        Serial.println("Calibration switch switched to LOW, stopping calibration...");
+        Serial.println("Saving calibration data to EEPROM...");
+        for (int i = 0; i < sensorCount; i++) { // store calibration data to EEPROM
+            longTermMemoryStore(i, calibratedMinimumOn[i]);
+            longTermMemoryStore(i + sensorCount, calibratedMaximumOn[i]);
+        }
+        longTermMemoryStore(lastCalibrationAmountAddress, calibrationAmount);
+        longTermMemoryStore(lastCalibrationTimeAddress, (millis() - calibrationStartTime));
+        Serial.println("Calibration data saved to EEPROM");
+        Serial.println("Calibration data:");
+        Serial.println("Updating display with calibration data...");
+        robotStatus = "Idle";
+        calibrationStatus = "Calibrated this session (:";
+        displayCalibrationData(1);
+        Serial.println("Display updated with calibration data");
+        Serial.println("Calibration complete");
+        setLEDColor(0, 0, 0);
+    }
 
-    // if (calibrationSwitch.rose()) { // if the calibration switch is turned on do this once
-    //     calibrationSwitchState = true;
-    //     selectMultiplexerPort(OLED_2_MULTIPLEXER_PORT);
-    //     Serial.println("Calibration switch switched to HIGH, calibrating...");
-    //     calibrationStartTime = millis();
-    //     calibrationAmount = 0;
-    //     robotStatus = "Calibratng";
-    //     calibrationStatus = "Calibrating line array...";
-    //     setLEDColor(200, 255, 10);
-    // }
+    if (calibrationSwitch.rose()) { // if the calibration switch is turned on do this once
+        calibrationSwitchState = true;
+        selectMultiplexerPort(OLED_2_MULTIPLEXER_PORT);
+        Serial.println("Calibration switch switched to HIGH, calibrating...");
+        calibrationStartTime = millis();
+        calibrationAmount = 0;
+        robotStatus = "Calibratng";
+        calibrationStatus = "Calibrating line array...";
+        setLEDColor(200, 255, 10);
+    }
     if (calibrationSwitchState) {
         calibrateSensor();
         displayCalibrationData(1);
