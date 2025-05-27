@@ -8,13 +8,27 @@
 #include <Bounce2.h>
 #include "Adafruit_VL53L0X.h"
 #include "Adafruit_TCS34725.h"
+#include <Servo.h>
 // #include <DFRobot_I2C_Multiplexer.h>
 
-//pins
+// -- PINS --
     // led
+    // led default (delete this)
 #define LED_RED_PIN 10 //pwm pin
-#define LED_GREEN_PIN 45 //pwm pin
+#define LED_GREEN_PIN 54 //pwm pin
 #define LED_BLUE_PIN 46 //pwm pin
+// SPEED LED (top center)
+#define SPEED_LED_RED_PIN 28
+#define SPEED_LED_GREEN_PIN 48
+#define SPEED_LED_BLUE_PIN 32
+// ERROR LED (bottom center)
+#define ERROR_LED_GREEN_PIN 52
+#define ERROR_LED_RED_PIN 53
+#define ERROR_LED_BLUE_PIN 22
+// POWER LED (bottom right next to power switch) - green plugged into battery after switch
+#define POWER_LED_RED_PIN 50
+#define POWER_LED_BLUE_PIN 51
+
     //motor
 #define MOTOR1_PWM 3
 #define MOTOR1_DIR 12
@@ -22,12 +36,23 @@
 #define MOTOR2_PWM 11
 #define MOTOR2_DIR 13
 #define MOTOR2_BRAKE 9
+    // servos
+#define SERVO1_PIN 52
+#define SERVO2_PIN 51
     //sensors
+        //ultrasonic
 #define ULTRASONIC_TRIG 2
 #define ULTRASONIC_ECHO 4
-#define CALIBRATION_SWITCH 2 //interupt pin
-#define PROGRAM_SWITCH 26 //interupt pin
-#define SETTINGS_SWITCH 19 //interupt pin - still available 20, 21
+        // rgb sensor
+#define RGB_LEFT_LED 34
+#define RGB_RIGHT_LED 33
+
+    // switches
+#define PROGRAM_SWITCH 45 // not interupt pin
+#define CALIBRATION_SWITCH 47 // not interupt pin
+#define SETTINGS_SWITCH 49 // not interupt pin - still available 20, 21
+
+
 // ultrasonic sensor
 #define ULTRASONIC_TRIG 2
 #define ULTRASONIC_ECHO 4
@@ -50,7 +75,8 @@ byte* echoPins = new byte[echoCount] { 12, 13 };
 #define SENSOR_ARRAY_13 A12
 
 #define SENSOR_ARRAY_SIZE 13
-#define EMITTER_PIN 34
+#define EMITTER_ODD_PIN 36
+#define EMITTER_EVEN_PIN 37
 
 const uint8_t sensorCount = 13;
 
@@ -69,23 +95,23 @@ const uint8_t sensorPins[sensorCount] = {
 #define SCL_PIN 21
 #define OLED_1_I2C_ADDRESS 0x78 // or 0x7a
 #define OLED_2_I2C_ADDRESS 0x78 // or 0x7a
-#define RGB_I2C_ADDRESS 0x05
-#define TOF_I2C_ADDRESS 0x06
+#define RGB_I2C_ADDRESS 0x29
+#define TOF_I2C_ADDRESS 0x29
 #define MULTIPLEXER_I2C_ADDRESS 0x70
 
 #define OLED_1_MULTIPLEXER_PORT 0
 #define OLED_2_MULTIPLEXER_PORT 1
-#define RGB_LEFT_MULTIPLEXER_PORT 3
-#define RGB_RIGHT_MULTIPLEXER_PORT 4
+#define RGB_LEFT_MULTIPLEXER_PORT 4
+#define RGB_RIGHT_MULTIPLEXER_PORT 3
 #define TOF_HOLDER_MULTIPLEXER_PORT 5
 #define TOF_FRONT_MULTIPLEXER_PORT 2
 
 
 //settings
 //PID SETTINGS
-#define kp 0.05 // experiment to determine this, start by something small that just makes your bot follow the line at a slow speed
-#define kd 2 // experiment to determine this, slowly increase the speeds and adjust this value. ( Note: Kp < Kd)
-#define ki 0.001 // experiment to determine this, start by something small that just makes your bot follow the line at a slow speed
+#define kp 0.25 // experiment to determine this, start by something small that just makes your bot follow the line at a slow speed
+#define kd 5.0// experiment to determine this, slowly increase the speeds and adjust this value.
+#define ki 0.0 // experiment to determine this, start by something small that just makes your bot follow the line at a slow speed
 //speeds out of 255
 // #define rightMaxSpeed 200 // max speed of the robot
 // #define leftMaxSpeed 200 // max speed of the robot
@@ -114,10 +140,12 @@ int brightness = 255;
 int contrast = 255;
 #define OLED_DISPLAY_WIDTH 128
 #define OLED_DISPLAY_HEIGHT 64
-//rgb colors 
-byte greenColor[3] = {0, 255, 0};
-byte whiteColor[3] = {255, 0, 0};
-byte blackColor[3] = {0, 0, 255};
+
+//RGB SETTINGS
+//rgb colors
+uint16_t r, g, b, c;
+String left_currentColor;
+String right_currentColor;
 //rgb autorange
 #define TCS34725_R_Coef 0.136
 #define TCS34725_G_Coef 1.000
@@ -140,14 +168,13 @@ bool calibrationSwitchState = false;
 #define NUM_BUTTONS 3
 #define NUM_SENSORS 13
 #define targetPosition 7000 // Adjust this value based on your sensor configuration
-float serialSpeed = 115200; // 4800, 9600, 38400, 115200
+float serialSpeed = 230400; // 4800, 9600, 38400, 115200
 String robotStatus = "Idle";
 bool systemReady = false;
 float calibrationTime;
 int calibrationAmount;
 int errorCode = 0;
 int speed = 0;
-bool programRunning = false;
 bool greenZoneDetected = false;
 int lineBrightnessMinimum = 100;
 bool programDisplayAlertStatus = false;
@@ -162,6 +189,38 @@ int rapidDisplayRefreshDelay = 300;
 int eepromCalibrationOffset = 1500;
 int frontTOFdistance;
 int holderTOFdistance;
+bool tofSensorActive = false;
+bool obstacleAvoidanceActive = false;
+bool programSwitchState = false;
+int lastMultiplexerPort = -1;
+// servo variables
+int servo1Angle = 90;
+int servo2Angle = 90;
+// int servo1lastAngle = servo1.read();
+// int servo2lastAngle = servo2.read();
+
+int servo1potValue = 0; // potentiometer value for servo 1
+int servo2potValue = 0; // potentiometer value for servo 2
+
+// left rgb
+// 0 - 65335
+int leftRGB_redRaw = 0;
+int leftRGB_greenRaw = 0;
+int leftRGB_blueRaw = 0;
+// 0-255
+int leftRGB_red = map(leftRGB_redRaw, 0, 65535, 0, 255);
+int leftRGB_green = map(leftRGB_greenRaw, 0, 65535, 0, 255);
+int leftRGB_blue = map(leftRGB_blueRaw, 0, 65535, 0, 255);
+// right rgb
+// 0 - 65335
+int rightRGB_redRaw = 0;
+int rightRGB_greenRaw = 0;
+int rightRGB_blueRaw = 0;
+// 0-255
+int rightRGB_red = map(rightRGB_redRaw, 0, 65535, 0, 255);
+int rightRGB_green = map(rightRGB_greenRaw, 0, 65535, 0, 255);
+int rightRGB_blue = map(rightRGB_blueRaw, 0, 65535, 0, 255);
+
 #define EEPROM_MAGIC 0xDEAD
 #define EEPROM_ADDR_MAGIC (eepromCalibrationOffset)
 #define EEPROM_ADDR_MIN (eepromCalibrationOffset + sizeof(uint16_t))
@@ -178,15 +237,18 @@ int holderTOFdistance;
 
     // sensor array setup
     // For QTRSensorsAnalog
-// QTRSensors qtra;
+// QTRSensors setup
 QTRSensors qtra;
+// tof sensor setup
 Adafruit_VL53L0X lox = Adafruit_VL53L0X();
-// QTRSensorsAnalog qtra(sensorPins, sensorCount, EMITTER_PIN, timeout);
-// QTRSensors qtra((unsigned char[]) {
-//     SENSOR_ARRAY_1, SENSOR_ARRAY_2, SENSOR_ARRAY_3, SENSOR_ARRAY_4, SENSOR_ARRAY_5,
-//     SENSOR_ARRAY_6, SENSOR_ARRAY_7, SENSOR_ARRAY_8, SENSOR_ARRAY_9, SENSOR_ARRAY_10,
-//     SENSOR_ARRAY_11, SENSOR_ARRAY_12, SENSOR_ARRAY_13
-// }, SENSOR_ARRAY_SIZE, EMITTER_PIN);
+VL53L0X_RangingMeasurementData_t measure;
+// RGB sensor setup
+Adafruit_TCS34725 tcs = Adafruit_TCS34725(TCS34725_INTEGRATIONTIME_50MS, TCS34725_GAIN_4X);
+// Servo setup
+Servo servo1;
+Servo servo2;
+
+
 
 // OLED display setup
 Adafruit_SSD1306 display[2] = {
@@ -205,8 +267,8 @@ void setPinModes(){
         pinMode(sensorPins[i], INPUT); // Use sensorPins array here
     }
     // toggle switches
-    pinMode(CALIBRATION_SWITCH, INPUT_PULLUP);
     pinMode(PROGRAM_SWITCH, INPUT_PULLUP);
+    pinMode(CALIBRATION_SWITCH, INPUT_PULLUP);
     pinMode(SETTINGS_SWITCH, INPUT_PULLUP);
     // ultrasonic sensor
     pinMode(ULTRASONIC_ECHO, INPUT);
@@ -220,24 +282,27 @@ void setPinModes(){
     pinMode(MOTOR2_BRAKE, OUTPUT);
     pinMode(ULTRASONIC_TRIG, OUTPUT);
     pinMode(ULTRASONIC_ECHO, INPUT);
-    pinMode(EMITTER_PIN, OUTPUT);
+    pinMode(EMITTER_ODD_PIN, OUTPUT);
+    pinMode(EMITTER_EVEN_PIN, OUTPUT);
     //leds
     pinMode(LED_RED_PIN, OUTPUT);
     pinMode(LED_GREEN_PIN, OUTPUT);
     pinMode(LED_BLUE_PIN, OUTPUT);
 }
 
-void initSensorArray(int emitterPin) {
+void initSensorArray() {
     qtra.setTypeAnalog();
     qtra.setSensorPins((const uint8_t[]){A15, A14, A13, A12, A11, A10, A9, A8, A5, A4, A3, A2, A1}, sensorCount);
-    qtra.setEmitterPin(emitterPin);
+    qtra.setEmitterPins(EMITTER_ODD_PIN, EMITTER_EVEN_PIN);
+    // qtra.setDimmable();
+    qtra.emittersOn();
     Serial.println("Sensor array initialized");
 }
 
 void initTOFSensor() {
     // init front TOF sensor
     selectMultiplexerPort(TOF_FRONT_MULTIPLEXER_PORT);
-    delay(20);
+    delay(100);
     Serial.println("Front VL53L0X init");
     if (!lox.begin()) {
         Serial.println(F("Failed to boot front VL53L0X"));
@@ -246,7 +311,7 @@ void initTOFSensor() {
 
     // init holder TOF sensor
     selectMultiplexerPort(TOF_HOLDER_MULTIPLEXER_PORT);
-    delay(20);
+    delay(100);
     Serial.println("Holder VL53L0X init...");
     if (!lox.begin()) {
         Serial.println(F("Failed to boot holder VL53L0X"));
@@ -262,35 +327,107 @@ void initTOFSensor() {
 }
 
 void readTOFSensors() {
-    VL53L0X_RangingMeasurementData_t measure;
-
     // read front TOF sensor
     selectMultiplexerPort(TOF_FRONT_MULTIPLEXER_PORT);
-    delay(20);
     lox.rangingTest(&measure, false);
-    // if (measure.RangeStatus != 4) {
-    //     Serial.print("Front TOF distance: ");
-    //     Serial.print(measure.RangeMilliMeter);
-    //     Serial.println(" mm");
-    //     frontTOFdistance = measure.RangeMilliMeter;
-    // } else {
-    //     Serial.println("Front TOF out of range");
-    // }
+    if (measure.RangeStatus != 4) {
+        Serial.print("Front TOF distance: ");
+        Serial.print(measure.RangeMilliMeter);
+        Serial.println(" mm");
+        frontTOFdistance = measure.RangeMilliMeter;
+    } else {
+        Serial.println("Front TOF out of range");
+    }
 
-    // // read holder TOF sensor
-    // selectMultiplexerPort(TOF_HOLDER_MULTIPLEXER_PORT);
-    // delay(20);
-    // lox.rangingTest(&measure, false);
-    // if (measure.RangeStatus != 4) {
-    //     Serial.print("Holder TOF distance: ");
-    //     Serial.print(measure.RangeMilliMeter);
-    //     Serial.println(" mm");
-    //     holderTOFdistance = measure.RangeMilliMeter;
-    // } else {
-    //     Serial.println("Holder TOF out of range");
-    // }
+    // read holder TOF sensor
+    selectMultiplexerPort(TOF_HOLDER_MULTIPLEXER_PORT);
+    lox.rangingTest(&measure, false);
+    if (measure.RangeStatus != 4) {
+        Serial.print("Holder TOF distance: ");
+        Serial.print(measure.RangeMilliMeter);
+        Serial.println(" mm");
+        holderTOFdistance = measure.RangeMilliMeter;
+    } else {
+        Serial.println("Holder TOF out of range");
+    }
 }
 
+void initRGBSensor() {
+    // init left RGB sensor
+    selectMultiplexerPort(RGB_LEFT_MULTIPLEXER_PORT);
+    delay(100);
+    Serial.println("Left TCS34725 init...");
+    if (!tcs.begin()) {
+        Serial.println(F("Failed to boot left TCS34725"));
+        errorCode = 401;
+    }
+
+    // init right RGB sensor
+    selectMultiplexerPort(RGB_RIGHT_MULTIPLEXER_PORT);
+    delay(100);
+    Serial.println("Right TCS34725 init...");
+    if (!tcs.begin()) {
+        Serial.println(F("Failed to boot right TCS34725"));
+        if (errorCode == 401) {
+            errorCode = 403;
+        }
+        else {
+            errorCode = 402;
+        }
+    }
+
+    Serial.println("TCS34725 sensors initialized successfully.");
+}
+
+void convertToRGB(int r, int g, int b, int c, int &red, int &green, int &blue) {
+    if (c == 0) c = 1;
+    red = (uint32_t(r) * 255) / c;
+    green = (uint32_t(g) * 255) / c;
+    blue = (uint32_t(b) * 255) / c;
+}
+
+void readRGBsensors() {
+    // read left RGB sensor
+    silent_selectMultiplexerPort(RGB_LEFT_MULTIPLEXER_PORT);
+    tcs.getRawData(&r, &g, &b, &c);
+    convertToRGB(r, g, b, c, leftRGB_red, leftRGB_green, leftRGB_blue);
+    
+    silent_selectMultiplexerPort(RGB_RIGHT_MULTIPLEXER_PORT);
+    tcs.getRawData(&r, &g, &b, &c);
+    convertToRGB(r, g, b, c, rightRGB_red, rightRGB_green, rightRGB_blue);
+}
+
+void detectColor() {
+
+}
+
+void powerRGB_LEDstate(bool red, bool blue) {
+    digitalWrite(POWER_LED_RED_PIN, red);
+    digitalWrite(POWER_LED_BLUE_PIN, blue);
+    // serial print status
+    Serial.print("Power LED state set to red: ");
+    Serial.print(red);
+    Serial.print(", blue: ");
+    Serial.println(blue);
+}
+
+void lineArray_emitterState(bool state) {
+    if (state) {
+        digitalWrite(EMITTER_ODD_PIN, HIGH);
+        digitalWrite(EMITTER_EVEN_PIN, HIGH);
+    } else {
+        digitalWrite(EMITTER_ODD_PIN, LOW);
+        digitalWrite(EMITTER_EVEN_PIN, LOW);
+    }
+    // serial print status
+    Serial.print("Line array emitter state set to: ");
+    Serial.println(state ? "ON" : "OFF");
+}
+
+void calibrateSensor(){
+    qtra.calibrate();
+    calibrationAmount++;
+}
 
 void buttonBounceSetup(){
     calibrationSwitch.attach(CALIBRATION_SWITCH, INPUT_PULLUP);
@@ -305,7 +442,7 @@ void buttonBounceSetup(){
 
 void resetDefaults(){
     digitalWrite(ULTRASONIC_TRIG, LOW);
-    digitalWrite(EMITTER_PIN, HIGH);
+    lineArray_emitterState(true);
     pinMode(CALIBRATION_SWITCH, INPUT_PULLUP);
     pinMode(PROGRAM_SWITCH, INPUT_PULLUP);
 }
@@ -362,6 +499,53 @@ bool retrieveCalibrationDataFromEEPROM() {
 
 }
 
+// servo stuff
+
+void initServos() {
+    servo1.attach(SERVO1_PIN);
+    servo2.attach(SERVO2_PIN);
+    Serial.println("Servos initialized");
+}
+
+void servoCalibration() {
+    servo1.write(90); // Set servo 1 to 90 degrees
+    servo2.write(90); // Set servo 2 to 90 degrees
+    delay(600);
+}
+
+void servoTest() {
+    servo1.write(0); // Move servo 1 to 0 degrees
+    servo2.write(0); // Move servo 2 to 0 degrees
+    delay(300);
+    servo1.write(180); // Move servo 1 to 180 degrees
+    servo2.write(180); // Move servo 2 to 180 degrees
+    delay(300);
+    servo1.write(0); // Move servo 1 back to 0 degrees
+    servo2.write(0); // Move servo 2 back to 0 degrees
+}
+
+void setServo1Angle(int angle) {
+    servo1.write(angle); // Set servo 1 to the specified angle
+}
+
+void setServo2Angle(int angle) {
+    servo2.write(angle); // Set servo 2 to the specified angle
+}
+
+void servoAttach() {
+    servo1.attach(SERVO1_PIN);
+    servo2.attach(SERVO2_PIN);
+    Serial.println("Servos attached");
+}
+
+void servoDetach() {
+    servo1.detach();
+    servo2.detach();
+    Serial.println("Servos detached");
+}
+
+// ultrasonic stuff
+
 int calculateUltrasonic(int trigPin, int echoPin) {
     digitalWrite(trigPin, LOW);  
 	  delayMicroseconds(2);  
@@ -382,7 +566,12 @@ void setLEDColor(int red, int green, int blue) {
     analogWrite(LED_BLUE_PIN, blue);
 }
 
-void initOLED(int displayNumber, int display_I2C, int textSize, int displayWidth, int displayHeight, int multiplexerPort){
+// display / oled stuff
+
+void initOLED(int displayNumber, int display_I2C, int textSize, int displayWidth, int displayHeight, int multiplexerPort) {
+    selectMultiplexerPort(multiplexerPort);
+    delay(100);
+
     String displayInstance = displayNumber + "display";
     Serial.println("OLED " + String(displayNumber) + " init started");
 
@@ -391,10 +580,10 @@ void initOLED(int displayNumber, int display_I2C, int textSize, int displayWidth
         return; // Exit function if initialization fails
     }
 
-    display[displayNumber].clearDisplay(); // clear the display
+    delay(100);
 
-    selectMultiplexerPort(multiplexerPort);
     display[displayNumber].clearDisplay(); // clear the display
+    display[displayNumber].setRotation(0); // set rotation
     display[displayNumber].setTextSize(textSize); // set text size
     display[displayNumber].setTextColor(SSD1306_WHITE); // set text color (won't actually change anything)
     display[displayNumber].setCursor(0, 0); // set cursor position
@@ -406,9 +595,7 @@ void initDisplays(int display1_I2Cport, int display2_I2Cport, int textSize, int 
     initOLED(0, display1_I2Cport, textSize, displayWidth, displayHeight, multiplexerPort1);
     initOLED(1, display2_I2Cport, textSize, displayWidth, displayHeight, multiplexerPort2);
     displayTest();
-    // delay(2000);
-    // displaySensorData();
-    // displayCalibrationData();
+    delay(1000);
     // calibration display stuff
 }
 
@@ -441,7 +628,6 @@ void displayCalibrationData(int displayNumber){
 
 void displayProgramData(){
     selectMultiplexerPort(OLED_1_MULTIPLEXER_PORT);
-    delay(20);
     display[0].clearDisplay();
     if (programDisplayAlertStatus = true) {;
         display[0].setTextSize(2);
@@ -484,7 +670,6 @@ void displayProgramData(){
 
 
     display[0].display();
-    delay(rapidDisplayRefreshDelay);
 }
 
 
@@ -521,7 +706,7 @@ void displayTest(){
 
     //display 1
     selectMultiplexerPort(OLED_2_MULTIPLEXER_PORT);
-    delay(40);
+    delay(100);
     display[1].clearDisplay();
     display[1].setTextColor(SSD1306_WHITE);
     display[1].setTextSize(2);
@@ -552,10 +737,37 @@ void printCalibrationResults(){
     Serial.println();
 }
 
-void calibrateSensor(){
-    qtra.calibrate();
-    calibrationAmount++;
+void loadDefaultDisplay() {
+    //settings
+    selectMultiplexerPort(OLED_1_MULTIPLEXER_PORT);
+    display[0].clearDisplay();
+    display[0].setTextColor(SSD1306_WHITE);
+    // outline
+    display[0].setTextSize(2);
+    display[0].setCursor(0, 0);
+    if (errorCode == 0) {
+        display[0].println("BRObot");
+    }
+    else if (errorCode != 0) {
+        display[0].println(("Err#: ") + String(errorCode));
+    }
+    display[0].setTextSize(1);
+    display[0].setCursor(0, 54);
+    display[0].println(("Billy and Rufus"));
+    // info
+    display[0].setCursor(0, 20);
+    display[0].println(("Speed: " + String(speed)));
+    display[0].setCursor(0, 30);
+    display[0].println(("Rbt Stus: " + String(robotStatus)));
+    display[0].display();
+    Serial.println("Default display loaded");
+
+    //display 2
+    selectMultiplexerPort(OLED_2_MULTIPLEXER_PORT);
+    displayCalibrationData(1);
 }
+
+//eeprom stuff
 
 void longTermMemoryStore(int address, int value){
     // EEPROM.write(address, value); // Write the value to the specified address **BE CAREFUL max 100k writes
@@ -575,26 +787,27 @@ void initMotors(){
     pinMode(MOTOR2_DIR, OUTPUT);
     pinMode(MOTOR2_BRAKE, OUTPUT);
 }
-void setM1Speed(int speed){
-    if (speed > 0){
+
+void setM1Speed(int speed) {
+    if (speed > 0) {
         digitalWrite(MOTOR1_DIR, HIGH);
-        analogWrite(MOTOR1_PWM, -speed);
-    }
-    else{
-        digitalWrite(MOTOR1_DIR, LOW);
         analogWrite(MOTOR1_PWM, speed);
+    } else {
+        digitalWrite(MOTOR1_DIR, LOW);
+        analogWrite(MOTOR1_PWM, abs(speed)); // use absolute value
     }
 }
-void setM2Speed(int speed){
-    if (speed > 0){
+
+void setM2Speed(int speed) {
+    if (speed > 0) {
         digitalWrite(MOTOR2_DIR, HIGH);
-        analogWrite(MOTOR2_PWM, -speed);
-    }
-    else{
-        digitalWrite(MOTOR2_DIR, LOW);
         analogWrite(MOTOR2_PWM, speed);
+    } else {
+        digitalWrite(MOTOR2_DIR, LOW);
+        analogWrite(MOTOR2_PWM, abs(speed)); // absolute value
     }
 }
+
 void setMotorSpeeds(int m1Speed, int m2Speed){
     setM1Speed(m1Speed);
     setM2Speed(m2Speed);
@@ -621,26 +834,49 @@ void unlockMotors(){
     Serial.println("Motors unlocked");
 }
 
-
 void motorTest() {
-    
+    setMotorBrakes(0, 0);
+    setMotorSpeeds(90, 90);
+    delay(400);
+    setMotorBrakes(1, 1);
+}
+
+void updateSwitchStates() {
+    calibrationSwitch.update();
+    programSwitch.update();
+    settingsSwitch.update();
 }
 
 void updateDisplayStatus(String status) {
     robotStatus = status;
     selectMultiplexerPort(OLED_2_MULTIPLEXER_PORT);
-    delay(20);
     displayCalibrationData(1);
 }
 
+// multiplexer stuff
+
 void selectMultiplexerPort(int port) {
     if (port > 7) return;  // Multiplexer has 8 channels (0-7)
-    
+    if (lastMultiplexerPort == port) return;
+
     Wire.beginTransmission(MULTIPLEXER_I2C_ADDRESS);
     Wire.write(1 << port);  // Send the channel bitmask
     Wire.endTransmission();
 
+    lastMultiplexerPort = port;
+
     Serial.println("Selected port " + String(port) + " on multiplexer");
+}
+
+void silent_selectMultiplexerPort(int port) {
+    if (port > 7) return;  // Multiplexer has 8 channels (0-7)
+    if (lastMultiplexerPort == port) return;
+    
+    Wire.beginTransmission(MULTIPLEXER_I2C_ADDRESS);
+    Wire.write(1 << port);  // Send the channel bitmask
+    Wire.endTransmission();
+    
+    lastMultiplexerPort = port;
 }
 
 void testForLostLine() {
@@ -656,43 +892,11 @@ void testForLostLine() {
     }
 }
 
-void loadDefaultDisplay() {
-    //settings
-    selectMultiplexerPort(OLED_1_MULTIPLEXER_PORT);
-    delay(40);
-    display[0].clearDisplay();
-    display[0].setTextColor(SSD1306_WHITE);
-    // outline
-    display[0].setTextSize(2);
-    display[0].setCursor(0, 0);
-    if (errorCode == 0) {
-        display[0].println("BRObot");
-    }
-    else if (errorCode != 0) {
-        display[0].println(("Err#: ") + String(errorCode));
-    }
-    display[0].setTextSize(1);
-    display[0].setCursor(0, 54);
-    display[0].println(("Billy and Rufus"));
-    // info
-    display[0].setCursor(0, 20);
-    display[0].println(("Speed: " + String(speed)));
-    display[0].setCursor(0, 30);
-    display[0].println(("Rbt Stus: " + String(robotStatus)));
-    display[0].display();
-    Serial.println("Default display loaded");
-
-    //display 2
-    selectMultiplexerPort(OLED_2_MULTIPLEXER_PORT);
-    delay(40);
-    displayCalibrationData(1);
-}
-
 void setup() {
     Serial.begin(serialSpeed);
     Serial.println("");
     Serial.println("Power on, starting setup - wait 0.5 seconds");
-    delay(200);
+    delay(600);
     Wire.begin();
     setPinModes();
     retrieveEEPROMvalues();
@@ -706,17 +910,15 @@ void setup() {
     delay(200);
     setLEDColor(100, 0, 255); //thinking color
 
-Serial.println("Selecting OLED 1 Port...");
-selectMultiplexerPort(OLED_1_MULTIPLEXER_PORT);
-delay(30);
-Serial.println("Selecting OLED 2 Port...");
-selectMultiplexerPort(OLED_2_MULTIPLEXER_PORT);
-delay(30);
-
+    delay(500);
     initDisplays(OLED_1_I2C_ADDRESS, OLED_2_I2C_ADDRESS, 1, brightness, contrast, OLED_DISPLAY_WIDTH, OLED_DISPLAY_HEIGHT, OLED_1_MULTIPLEXER_PORT, OLED_2_MULTIPLEXER_PORT);
-    initSensorArray(EMITTER_PIN);
+    initSensorArray();
     initTOFSensor();
     buttonBounceSetup();
+    motorTest();
+    initServos();
+    servoCalibration();
+    servoTest();
     Serial.println("Setup complete");
     delay(650);
     loadDefaultDisplay();
@@ -726,12 +928,9 @@ delay(30);
 
 
 void loop() {
-
     // calibration
-
     // update calibration switch
-    calibrationSwitch.update();
-    bool calibrationSwitchState = calibrationSwitch.read() == HIGH;
+    updateSwitchStates();
 
     if (calibrationSwitch.fell()) { // if the calibration switch is turned off do this once
         calibrationSwitchState = false;
@@ -743,7 +942,7 @@ void loop() {
         displayCalibrationData(1);
         Serial.println("Calibration switch switched to LOW, stopping calibration...");
         Serial.println("Saving calibration data to EEPROM...");
-        storeCalibrationDataToEEPROM();
+        // storeCalibrationDataToEEPROM();
         Serial.println("Calibration data:");
         Serial.println("Updating display with calibration data...");
         robotStatus = "Idle";
@@ -757,52 +956,51 @@ void loop() {
     if (calibrationSwitch.rose()) { // if the calibration switch is turned on do this once
         setLEDColor(100, 0, 255); //thinking color
         calibrationSwitchState = true;
-        selectMultiplexerPort(OLED_2_MULTIPLEXER_PORT);
         Serial.println("Calibration switch switched to HIGH, calibrating...");
         calibrationStartTime = millis();
         calibrationAmount = 0;
         robotStatus = "Calibratng";
         calibrationStatus = "Calibrating line array...";
         setLEDColor(200, 255, 10);
-    }
-    if (calibrationSwitchState) {
-        calibrateSensor();
         displayCalibrationData(1);
-        delay(15);
     }
 
-    // update calibration switch
-    programSwitch.update();
-    bool programSwitchState = programSwitch.read() == HIGH;
-
-    if (programSwitch.fell()) { // if the program switch is turned off do this once
-        stopMotors();
-        updateDisplayStatus("Stpng Prog");
-        Serial.println("Program switch switched to LOW, stopping program...");
-        setLEDColor(100, 0, 255); //thinking color
-        updateDisplayStatus("Idle");
-        programRunning = false;
-        loadDefaultDisplay();
-        setMotorBrakes(1, 1); // lock brakes
-        setLEDColor(255, 255, 255);
+    if (calibrationSwitchState == true) {
+        calibrateSensor();
+        // displayCalibrationData(1);
+        delay(2);
     }
 
     if (programSwitch.rose()) { // if the program switch is turned on do this once
-        updateDisplayStatus("Runng Prog");
         Serial.println("Program switch switched to HIGH, starting program...");
+        updateDisplayStatus("Runng Prog");
         setLEDColor(255, 255, 0);
         setMotorBrakes(0, 0); // unlock brakes
-        programRunning = true;
+        programSwitchState = true;
         displayProgramData();
+    }
+
+    if (programSwitch.fell()) { // if the program switch is turned off do this once
+        Serial.println("Program switch switched to LOW, stopping program...");
+        stopMotors();
+        updateDisplayStatus("Stpng Prog");
+        setLEDColor(100, 0, 255); //thinking color
+        programSwitchState = false;
+        loadDefaultDisplay();
+        setMotorBrakes(1, 1); // lock brakes
+        setLEDColor(255, 255, 255);
+        updateDisplayStatus("Idle");
     }
 
     // WHILE THE PROGRAM SWITCH IS ON
 
-    if (programSwitchState == true || lineFollow == true) { // while the program switch is on do this (loop)
+    if (programSwitchState == true && lineFollow == true) { // while the program switch is on do this (loop)
+
+        readRGBsensors();
 
     // pid line following
         uint16_t sensorValues[NUM_SENSORS]; // Array to hold sensor values
-        uint16_t position = qtra.readLineBlack(sensorValues); // Get the position of the line
+        uint16_t position = qtra.readLineBlack(sensorValues, QTRReadMode::On); // Get the position of the line
         for (uint8_t i = 0; i < sensorCount; i++) // Loop through each sensor value and print them into the serial monitor
         {
             Serial.print(sensorValues[i]);
@@ -810,7 +1008,6 @@ void loop() {
         }
         Serial.println(position);
         
-
         // Calculate error
         int error = position - targetPosition; // Calculate error. - how far away it is from the line
 
@@ -841,52 +1038,57 @@ void loop() {
 
 
         unlockMotors();
-        setM1Speed(leftSpeed); // Forward
-        setM2Speed(rightSpeed); // Forward
+        setM1Speed(rightSpeed); // Forward
+        setM2Speed(leftSpeed); // Forward
 
         // Update last error
         lastError = error;
     }
 
-    if (programSwitchState == true) {
+    if (programSwitchState == true && tofSensorActive == true) {
         // tof sensing
         readTOFSensors();
+    }
 
-        if (frontTOFdistance < slowDistance) { // if the bottle is detected, slow down
-            updateDisplayStatus("Obst Slow");
-            Serial.println("Bottle detected, slowing down...");
-            currentLeftBaseSpeed = bottleBaseSpeed;
-            currentRightBaseSpeed = bottleBaseSpeed;
-        }
+    if (frontTOFdistance < slowDistance && obstacleAvoidanceActive == true) { // if the bottle is detected, slow down
+        updateDisplayStatus("Obst Slow");
+        Serial.println("Bottle detected, slowing down...");
+        currentLeftBaseSpeed = bottleBaseSpeed;
+        currentRightBaseSpeed = bottleBaseSpeed;
+    }
 
-        if (!(frontTOFdistance < slowDistance)) { // if the bottle is not detected, set the base speed back to normal
-            updateDisplayStatus("Obst Clear");
-            Serial.println("Bottle lost, setting base speed back to normal...");
-        }
+    if (frontTOFdistance <= goAroundDistance && obstacleAvoidanceActive == true) { // go around when bottle is detected under the minimum distance
+        updateDisplayStatus("Go Around");
+        Serial.println("Bottle detected and is under the minimum distance, going around...");
+        lineFollow = false; // stop line following
+        delay(1000); // wait for 1 second to confirm the bottle is detected
 
-        if (frontTOFdistance < goAroundDistance) { // go around when bottle is detected under the minimum distance
-            updateDisplayStatus("Go Around");
-            Serial.println("Bottle detected and is under the minimum distance, going around...");
-            lineFollow = false; // stop line following
-            delay(1000); // wait for 1 second to confirm the bottle is detected
-            
-            if (frontTOFdistance < goAroundDistance+10) { // check again
-                // instructions to go around the obstacle
-                // setM1Speed(-bottleMaxSpeed); // Backward
-                // setM2Speed(bottleMaxSpeed); // Forward
-                // delay(1000); // wait for 1 second
-                // setM1Speed(bottleMaxSpeed); // Forward
-                // setM2Speed(bottleMaxSpeed); // Forward
-                // delay(1000); // wait for 1 second
-                // setM1Speed(-bottleMaxSpeed); // Backward
-                // setM2Speed(bottleMaxSpeed); // Forward
-            }
-            else {
-                lineFollow = true; // start line following again
-            }
+            // instructions to go around the obstacle
+            // setM1Speed(-bottleMaxSpeed); // Backward
+            // setM2Speed(bottleMaxSpeed); // Forward
+            // delay(1000); // wait for 1 second
+            // setM1Speed(bottleMaxSpeed); // Forward
+            // setM2Speed(bottleMaxSpeed); // Forward
+            // delay(1000); // wait for 1 second
+            // setM1Speed(-bottleMaxSpeed); // Backward
+            // setM2Speed(bottleMaxSpeed); // Forward
 
+            updateDisplayStatus("GoRoundCmplte");
+            Serial.println("Go around complete, wait 1 second...");
+            delay(1000); // wait for 1 second
+
+            // Once go around is complete
             currentLeftBaseSpeed = leftBaseSpeed;
             currentRightBaseSpeed = rightBaseSpeed;
-        }
+            lineFollow = true; // start line following again
+            updateDisplayStatus("Resume Line");
+            Serial.println("Resuming line following...");
+    }
+    
+    if (!(frontTOFdistance >= slowDistance) && obstacleAvoidanceActive == true) { // if the bottle is not detected, set the base speed back to normal
+        updateDisplayStatus("Obst Clear");
+        Serial.println("Bottle lost, setting base speed back to normal...");
+        currentLeftBaseSpeed = leftBaseSpeed;
+        currentRightBaseSpeed = rightBaseSpeed;
     }
 }
