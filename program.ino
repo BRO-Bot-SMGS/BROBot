@@ -87,13 +87,25 @@ const uint8_t sensorPins[sensorCount] = {
 #define kd 2 // experiment to determine this, slowly increase the speeds and adjust this value. ( Note: Kp < Kd)
 #define ki 0.001 // experiment to determine this, start by something small that just makes your bot follow the line at a slow speed
 //speeds out of 255
-#define rightMaxSpeed 200 // max speed of the robot
-#define leftMaxSpeed 200 // max speed of the robot
+// #define rightMaxSpeed 200 // max speed of the robot
+// #define leftMaxSpeed 200 // max speed of the robot
 #define rightBaseSpeed 150 // this is the speed at which the motors should spin when the robot is perfectly on the line
 #define leftBaseSpeed 150  // this is the speed at which the motors should spin when the robot is perfectly on the line
 #define timeout 2500  // waits for 2500 us for sensor outputs to go low
 static int lastError = 0;
 static float integral = 0;
+
+//TOF SETTINGS
+int slowDistance = 100; // distance from the bottle to start slowing down (in mm)
+int bottleMaxSpeed = 60; // slow speed once bottle is in range
+int bottleBaseSpeed = 40; // max speed of the robot
+int goAroundDistance = 60; // distance from the bottle to start going around (in mm)
+// movement temp variables
+int currentRightBaseSpeed = rightBaseSpeed;
+int currentLeftBaseSpeed = leftBaseSpeed;
+// int currentRightMaxSpeed = rightMaxSpeed;
+// int currentLeftMaxSpeed = leftMaxSpeed;
+bool lineFollow = true;
 
 //LINE ARRAY SETTINGS
 float samplesPerRead = 4;
@@ -148,10 +160,13 @@ int leftSpeed = 0;
 int rightSpeed = 0;
 int rapidDisplayRefreshDelay = 300;
 int eepromCalibrationOffset = 1500;
+int frontTOFdistance;
+int holderTOFdistance;
 #define EEPROM_MAGIC 0xDEAD
 #define EEPROM_ADDR_MAGIC (eepromCalibrationOffset)
 #define EEPROM_ADDR_MIN (eepromCalibrationOffset + sizeof(uint16_t))
 #define EEPROM_ADDR_MAX (EEPROM_ADDR_MIN + NUM_SENSORS * sizeof(uint16_t))
+
 //eeprom addresses
 #define lastCalibrationAmountAddress 101
 #define lastCalibrationTimeAddress 102
@@ -165,6 +180,7 @@ int eepromCalibrationOffset = 1500;
     // For QTRSensorsAnalog
 // QTRSensors qtra;
 QTRSensors qtra;
+Adafruit_VL53L0X lox = Adafruit_VL53L0X();
 // QTRSensorsAnalog qtra(sensorPins, sensorCount, EMITTER_PIN, timeout);
 // QTRSensors qtra((unsigned char[]) {
 //     SENSOR_ARRAY_1, SENSOR_ARRAY_2, SENSOR_ARRAY_3, SENSOR_ARRAY_4, SENSOR_ARRAY_5,
@@ -182,7 +198,6 @@ Bounce calibrationSwitch = Bounce();
 Bounce programSwitch = Bounce();
 Bounce settingsSwitch = Bounce();
 //functions
-
 
 void setPinModes(){
     // sensor array
@@ -218,6 +233,64 @@ void initSensorArray(int emitterPin) {
     qtra.setEmitterPin(emitterPin);
     Serial.println("Sensor array initialized");
 }
+
+void initTOFSensor() {
+    // init front TOF sensor
+    selectMultiplexerPort(TOF_FRONT_MULTIPLEXER_PORT);
+    delay(20);
+    Serial.println("Front VL53L0X init");
+    if (!lox.begin()) {
+        Serial.println(F("Failed to boot front VL53L0X"));
+        errorCode = 301;
+    }
+
+    // init holder TOF sensor
+    selectMultiplexerPort(TOF_HOLDER_MULTIPLEXER_PORT);
+    delay(20);
+    Serial.println("Holder VL53L0X init...");
+    if (!lox.begin()) {
+        Serial.println(F("Failed to boot holder VL53L0X"));
+        if (errorCode == 301) {
+            errorCode = 303;
+        }
+        else {
+            errorCode = 302;
+        }
+    }
+
+    Serial.println("VL53L0X sensors initialized successfully.");
+}
+
+void readTOFSensors() {
+    VL53L0X_RangingMeasurementData_t measure;
+
+    // read front TOF sensor
+    selectMultiplexerPort(TOF_FRONT_MULTIPLEXER_PORT);
+    delay(20);
+    lox.rangingTest(&measure, false);
+    // if (measure.RangeStatus != 4) {
+    //     Serial.print("Front TOF distance: ");
+    //     Serial.print(measure.RangeMilliMeter);
+    //     Serial.println(" mm");
+    //     frontTOFdistance = measure.RangeMilliMeter;
+    // } else {
+    //     Serial.println("Front TOF out of range");
+    // }
+
+    // // read holder TOF sensor
+    // selectMultiplexerPort(TOF_HOLDER_MULTIPLEXER_PORT);
+    // delay(20);
+    // lox.rangingTest(&measure, false);
+    // if (measure.RangeStatus != 4) {
+    //     Serial.print("Holder TOF distance: ");
+    //     Serial.print(measure.RangeMilliMeter);
+    //     Serial.println(" mm");
+    //     holderTOFdistance = measure.RangeMilliMeter;
+    // } else {
+    //     Serial.println("Holder TOF out of range");
+    // }
+}
+
 
 void buttonBounceSetup(){
     calibrationSwitch.attach(CALIBRATION_SWITCH, INPUT_PULLUP);
@@ -283,7 +356,6 @@ bool retrieveCalibrationDataFromEEPROM() {
     for (int i = 0; i < NUM_SENSORS; i++) { // load eeprom min values
         int addr = EEPROM_ADDR_MIN + i;
         EEPROM.get(addr, qtra.calibrationOn. minimum[i]);
-        qtra.calibrationOn.minimum[i] = EEPROM.read(addr);
     }
 
     Serial.println("Calibration data loaded from EEPROM.");
@@ -643,6 +715,7 @@ delay(30);
 
     initDisplays(OLED_1_I2C_ADDRESS, OLED_2_I2C_ADDRESS, 1, brightness, contrast, OLED_DISPLAY_WIDTH, OLED_DISPLAY_HEIGHT, OLED_1_MULTIPLEXER_PORT, OLED_2_MULTIPLEXER_PORT);
     initSensorArray(EMITTER_PIN);
+    initTOFSensor();
     buttonBounceSetup();
     Serial.println("Setup complete");
     delay(650);
@@ -698,15 +771,6 @@ void loop() {
         delay(15);
     }
 
-    // line following
-    
-    // detect lost line
-    // testForLostLine();
-
-    // if (lineLost) {
-    //     setMotorSpeedsAndBrakes(100, 100, 0, 0);
-    // }
-
     // update calibration switch
     programSwitch.update();
     bool programSwitchState = programSwitch.read() == HIGH;
@@ -732,7 +796,9 @@ void loop() {
         displayProgramData();
     }
 
-    if (programSwitchState == true) { // while the program switch is on do this (loop)
+    // WHILE THE PROGRAM SWITCH IS ON
+
+    if (programSwitchState == true || lineFollow == true) { // while the program switch is on do this (loop)
 
     // pid line following
         uint16_t sensorValues[NUM_SENSORS]; // Array to hold sensor values
@@ -745,26 +811,26 @@ void loop() {
         Serial.println(position);
         
 
-        // Calculate error.
+        // Calculate error
         int error = position - targetPosition; // Calculate error. - how far away it is from the line
 
-        // Calculate integral.
+        // Calculate integral
         integral += error; //cumulative sum of the errors over time. It accounts for past errors and helps eliminate residual steady-state errors.
 
-        // Limit the integral term to prevent windup.
+        // Limit the integral term to prevent windup
         integral = constrain(integral, -500, 500);
 
-        // Calculate derivative.
+        // Calculate derivative
         int derivative = error - lastError; //is the rate of change of the error. It predicts future error based on its current rate of change, helping to dampen the system response and reduce overshoot.
 
-        // Calculate PID output.
+        // Calculate PID output
         float pidOutput = kp * error + ki * integral + kd * derivative;
 
-        // Calculate motor speeds.
-        int leftSpeed = leftBaseSpeed - pidOutput;
-        int rightSpeed = rightBaseSpeed + pidOutput;
+        // Calculate motor speeds
+        int leftSpeed = currentLeftBaseSpeed - pidOutput;
+        int rightSpeed = currentRightBaseSpeed + pidOutput;
 
-        // Constrain motor speeds to valid range (0-255 for PWM).
+        // Constrain motor speeds to valid range (0-255 for PWM)
         leftSpeed = constrain(leftSpeed, 0, 255);
         rightSpeed = constrain(rightSpeed, 0, 255);
 
@@ -778,7 +844,49 @@ void loop() {
         setM1Speed(leftSpeed); // Forward
         setM2Speed(rightSpeed); // Forward
 
-        // Update last error.
+        // Update last error
         lastError = error;
+    }
+
+    if (programSwitchState == true) {
+        // tof sensing
+        readTOFSensors();
+
+        if (frontTOFdistance < slowDistance) { // if the bottle is detected, slow down
+            updateDisplayStatus("Obst Slow");
+            Serial.println("Bottle detected, slowing down...");
+            currentLeftBaseSpeed = bottleBaseSpeed;
+            currentRightBaseSpeed = bottleBaseSpeed;
+        }
+
+        if (!(frontTOFdistance < slowDistance)) { // if the bottle is not detected, set the base speed back to normal
+            updateDisplayStatus("Obst Clear");
+            Serial.println("Bottle lost, setting base speed back to normal...");
+        }
+
+        if (frontTOFdistance < goAroundDistance) { // go around when bottle is detected under the minimum distance
+            updateDisplayStatus("Go Around");
+            Serial.println("Bottle detected and is under the minimum distance, going around...");
+            lineFollow = false; // stop line following
+            delay(1000); // wait for 1 second to confirm the bottle is detected
+            
+            if (frontTOFdistance < goAroundDistance+10) { // check again
+                // instructions to go around the obstacle
+                // setM1Speed(-bottleMaxSpeed); // Backward
+                // setM2Speed(bottleMaxSpeed); // Forward
+                // delay(1000); // wait for 1 second
+                // setM1Speed(bottleMaxSpeed); // Forward
+                // setM2Speed(bottleMaxSpeed); // Forward
+                // delay(1000); // wait for 1 second
+                // setM1Speed(-bottleMaxSpeed); // Backward
+                // setM2Speed(bottleMaxSpeed); // Forward
+            }
+            else {
+                lineFollow = true; // start line following again
+            }
+
+            currentLeftBaseSpeed = leftBaseSpeed;
+            currentRightBaseSpeed = rightBaseSpeed;
+        }
     }
 }
