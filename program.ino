@@ -30,15 +30,13 @@
 #define POWER_LED_BLUE_PIN 51
 
     //motor
-#define MOTOR1_PWM 3
-#define MOTOR1_DIR 12
-#define MOTOR1_BRAKE 8
-#define MOTOR2_PWM 11
-#define MOTOR2_DIR 13
-#define MOTOR2_BRAKE 9
+#define M1_DIR_PIN   7
+#define M1_PWM_PIN   6
+#define M2_DIR_PIN   4
+#define M2_PWM_PIN   5
     // servos
-#define SERVO1_PIN 52
-#define SERVO2_PIN 51
+#define SERVO1_PIN 44
+#define SERVO2_PIN 45
     //sensors
         //ultrasonic
 #define ULTRASONIC_TRIG 2
@@ -48,7 +46,7 @@
 #define RGB_RIGHT_LED 33
 
     // switches
-#define PROGRAM_SWITCH 45 // not interupt pin
+#define PROGRAM_SWITCH 51 // not interupt pin
 #define CALIBRATION_SWITCH 47 // not interupt pin
 #define SETTINGS_SWITCH 49 // not interupt pin - still available 20, 21
 
@@ -60,9 +58,9 @@ byte triggerPin = 21;
 byte echoCount = 2;
 byte* echoPins = new byte[echoCount] { 12, 13 };
         //sensor array
-#define SENSOR_ARRAY_1 A0
-#define SENSOR_ARRAY_2 A1
-#define SENSOR_ARRAY_3 A2
+// #define SENSOR_ARRAY_1 A0
+// #define SENSOR_ARRAY_2 A1
+// #define SENSOR_ARRAY_3 A2
 #define SENSOR_ARRAY_4 A3
 #define SENSOR_ARRAY_5 A4
 #define SENSOR_ARRAY_6 A5
@@ -70,24 +68,30 @@ byte* echoPins = new byte[echoCount] { 12, 13 };
 #define SENSOR_ARRAY_8 A7
 #define SENSOR_ARRAY_9 A8
 #define SENSOR_ARRAY_10 A9
-#define SENSOR_ARRAY_11 A10
-#define SENSOR_ARRAY_12 A11
-#define SENSOR_ARRAY_13 A12
+// #define SENSOR_ARRAY_11 A10
+// #define SENSOR_ARRAY_12 A11
+// #define SENSOR_ARRAY_13 A12
 
 #define SENSOR_ARRAY_SIZE 13
 #define EMITTER_ODD_PIN 36
 #define EMITTER_EVEN_PIN 37
 
-const uint8_t sensorCount = 13;
+// const uint8_t sensorCount = 13;
+const uint8_t sensorCount = 7;
+// #define NUM_SENSORS 13
+#define NUM_SENSORS 7
 
-byte SENSOR_PIN_ARRAY[SENSOR_ARRAY_SIZE] = 
-    {SENSOR_ARRAY_1, SENSOR_ARRAY_2, SENSOR_ARRAY_3, SENSOR_ARRAY_4, SENSOR_ARRAY_5, SENSOR_ARRAY_6, SENSOR_ARRAY_7, SENSOR_ARRAY_8, SENSOR_ARRAY_9, SENSOR_ARRAY_10, SENSOR_ARRAY_11, SENSOR_ARRAY_12, SENSOR_ARRAY_13};
+// const uint8_t sensorPins[sensorCount] = {
+//     SENSOR_ARRAY_1, SENSOR_ARRAY_2, SENSOR_ARRAY_3, SENSOR_ARRAY_4,
+//     SENSOR_ARRAY_5, SENSOR_ARRAY_6, SENSOR_ARRAY_7, SENSOR_ARRAY_8,
+//     SENSOR_ARRAY_9, SENSOR_ARRAY_10, SENSOR_ARRAY_11, SENSOR_ARRAY_12,
+//     SENSOR_ARRAY_13
+// };
 
 const uint8_t sensorPins[sensorCount] = {
-    SENSOR_ARRAY_1, SENSOR_ARRAY_2, SENSOR_ARRAY_3, SENSOR_ARRAY_4,
+    SENSOR_ARRAY_4,
     SENSOR_ARRAY_5, SENSOR_ARRAY_6, SENSOR_ARRAY_7, SENSOR_ARRAY_8,
-    SENSOR_ARRAY_9, SENSOR_ARRAY_10, SENSOR_ARRAY_11, SENSOR_ARRAY_12,
-    SENSOR_ARRAY_13
+    SENSOR_ARRAY_9, SENSOR_ARRAY_10
 };
 
 //i2c addresses
@@ -115,14 +119,14 @@ const uint8_t sensorPins[sensorCount] = {
 //speeds out of 255
 // #define rightMaxSpeed 200 // max speed of the robot
 // #define leftMaxSpeed 200 // max speed of the robot
-#define rightBaseSpeed 150 // this is the speed at which the motors should spin when the robot is perfectly on the line
-#define leftBaseSpeed 150  // this is the speed at which the motors should spin when the robot is perfectly on the line
+#define rightBaseSpeed 240 // this is the speed at which the motors should spin when the robot is perfectly on the line
+#define leftBaseSpeed 240 // this is the speed at which the motors should spin when the robot is perfectly on the line
 #define timeout 2500  // waits for 2500 us for sensor outputs to go low
 static int lastError = 0;
 static float integral = 0;
 
 //TOF SETTINGS
-int slowDistance = 100; // distance from the bottle to start slowing down (in mm)
+int slowDistance = 120; // distance from the bottle to start slowing down (in mm)
 int bottleMaxSpeed = 60; // slow speed once bottle is in range
 int bottleBaseSpeed = 40; // max speed of the robot
 int goAroundDistance = 60; // distance from the bottle to start going around (in mm)
@@ -166,7 +170,6 @@ String calibrationStatus = "Calibrated - outdated";
 float duration, distance;  
 bool calibrationSwitchState = false;
 #define NUM_BUTTONS 3
-#define NUM_SENSORS 13
 #define targetPosition 7000 // Adjust this value based on your sensor configuration
 float serialSpeed = 230400; // 4800, 9600, 38400, 115200
 String robotStatus = "Idle";
@@ -274,16 +277,16 @@ void setPinModes(){
     pinMode(ULTRASONIC_ECHO, INPUT);
     pinMode(ULTRASONIC_TRIG, OUTPUT);
     // motor control
-    pinMode(MOTOR1_PWM, OUTPUT);
-    pinMode(MOTOR1_DIR, OUTPUT);
-    pinMode(MOTOR1_BRAKE, OUTPUT);
-    pinMode(MOTOR2_PWM, OUTPUT);
-    pinMode(MOTOR2_DIR, OUTPUT);
-    pinMode(MOTOR2_BRAKE, OUTPUT);
-    pinMode(ULTRASONIC_TRIG, OUTPUT);
-    pinMode(ULTRASONIC_ECHO, INPUT);
+    pinMode(M1_DIR_PIN, OUTPUT);
+    pinMode(M1_PWM_PIN, OUTPUT);
+    pinMode(M2_DIR_PIN, OUTPUT);
+    pinMode(M2_PWM_PIN, OUTPUT);
+    // line array emitters
     pinMode(EMITTER_ODD_PIN, OUTPUT);
     pinMode(EMITTER_EVEN_PIN, OUTPUT);
+    // servo control
+    pinMode(SERVO1_PIN, OUTPUT);
+    pinMode(SERVO2_PIN, OUTPUT);
     //leds
     pinMode(LED_RED_PIN, OUTPUT);
     pinMode(LED_GREEN_PIN, OUTPUT);
@@ -292,7 +295,7 @@ void setPinModes(){
 
 void initSensorArray() {
     qtra.setTypeAnalog();
-    qtra.setSensorPins((const uint8_t[]){A15, A14, A13, A12, A11, A10, A9, A8, A5, A4, A3, A2, A1}, sensorCount);
+    qtra.setSensorPins(sensorPins, sensorCount);
     qtra.setEmitterPins(EMITTER_ODD_PIN, EMITTER_EVEN_PIN);
     // qtra.setDimmable();
     qtra.emittersOn();
@@ -516,10 +519,10 @@ void servoCalibration() {
 void servoTest() {
     servo1.write(0); // Move servo 1 to 0 degrees
     servo2.write(0); // Move servo 2 to 0 degrees
-    delay(300);
+    delay(2000);
     servo1.write(180); // Move servo 1 to 180 degrees
     servo2.write(180); // Move servo 2 to 180 degrees
-    delay(300);
+    delay(2000);
     servo1.write(0); // Move servo 1 back to 0 degrees
     servo2.write(0); // Move servo 2 back to 0 degrees
 }
@@ -775,70 +778,42 @@ void longTermMemoryStore(int address, int value){
 }
 
 
-// motor stuff
-
-void initMotors(){
-    //motor 1
-    pinMode(MOTOR1_PWM, OUTPUT);
-    pinMode(MOTOR1_DIR, OUTPUT);
-    pinMode(MOTOR1_BRAKE, OUTPUT);
-    //motor 2
-    pinMode(MOTOR2_PWM, OUTPUT);
-    pinMode(MOTOR2_DIR, OUTPUT);
-    pinMode(MOTOR2_BRAKE, OUTPUT);
-}
+// motor control
 
 void setM1Speed(int speed) {
     if (speed > 0) {
-        digitalWrite(MOTOR1_DIR, HIGH);
-        analogWrite(MOTOR1_PWM, speed);
+        digitalWrite(M1_DIR_PIN, LOW);
     } else {
-        digitalWrite(MOTOR1_DIR, LOW);
-        analogWrite(MOTOR1_PWM, abs(speed)); // use absolute value
+        digitalWrite(M1_DIR_PIN, HIGH);
+        speed = -speed;
     }
+    analogWrite(M1_PWM_PIN, constrain(speed, 0, 255));
 }
 
 void setM2Speed(int speed) {
     if (speed > 0) {
-        digitalWrite(MOTOR2_DIR, HIGH);
-        analogWrite(MOTOR2_PWM, speed);
+        digitalWrite(M2_DIR_PIN, LOW);
     } else {
-        digitalWrite(MOTOR2_DIR, LOW);
-        analogWrite(MOTOR2_PWM, abs(speed)); // absolute value
+        digitalWrite(M2_DIR_PIN, HIGH);
+        speed = -speed;
     }
+    analogWrite(M2_PWM_PIN, constrain(speed, 0, 255));
 }
 
 void setMotorSpeeds(int m1Speed, int m2Speed){
     setM1Speed(m1Speed);
     setM2Speed(m2Speed);
 }
-void setM1Brake(int brake){
-    digitalWrite(MOTOR1_BRAKE, brake);
-}
-void setM2Brake(int brake){
-    digitalWrite(MOTOR2_BRAKE, brake);
-}
-void setMotorBrakes(int m1Brake, int m2Brake){
-    setM1Brake(m1Brake);
-    setM2Brake(m2Brake);
-}
-void setMotorSpeedsAndBrakes(int m1Speed, int m2Speed, int m1Brake, int m2Brake){
-    setMotorSpeeds(m1Speed, m2Speed);
-    setMotorBrakes(m1Brake, m2Brake);
-}
-void stopMotors(){
-    setMotorSpeedsAndBrakes(0, 0, 1, 1);
-}
-void unlockMotors(){
-    setMotorBrakes(0, 0);
-    Serial.println("Motors unlocked");
-}
 
 void motorTest() {
-    setMotorBrakes(0, 0);
-    setMotorSpeeds(90, 90);
-    delay(400);
-    setMotorBrakes(1, 1);
+    Serial.println("Starting motor test...");
+    setMotorSpeeds(0, 0);
+    setMotorSpeeds(255, 255);
+    delay(800);
+    setMotorSpeeds(-60, -60);
+    delay(800);
+    setMotorSpeeds(0, 0);
+    Serial.println("Motor test complete");
 }
 
 void updateSwitchStates() {
@@ -883,7 +858,7 @@ void testForLostLine() {
     for (int i = 0; i < NUM_SENSORS; i++) {
         if (sensorValues[i] < lineBrightnessMinimum) { // Adjust threshold based on sensor readings
             lineLost=true;
-            stopMotors();
+            setMotorSpeeds(0, 0); // Stop motors if line is lost
             updateDisplayStatus("Lost Line");
         }
         else {
@@ -900,8 +875,7 @@ void setup() {
     Wire.begin();
     setPinModes();
     retrieveEEPROMvalues();
-    initMotors();
-    stopMotors();
+    setMotorSpeeds(0, 0);
     setLEDColor(255, 0, 0); //red
     delay(200);
     setLEDColor(0, 255, 0); //green
@@ -975,19 +949,17 @@ void loop() {
         Serial.println("Program switch switched to HIGH, starting program...");
         updateDisplayStatus("Runng Prog");
         setLEDColor(255, 255, 0);
-        setMotorBrakes(0, 0); // unlock brakes
         programSwitchState = true;
         displayProgramData();
     }
 
     if (programSwitch.fell()) { // if the program switch is turned off do this once
         Serial.println("Program switch switched to LOW, stopping program...");
-        stopMotors();
+        setMotorSpeeds(0, 0);
         updateDisplayStatus("Stpng Prog");
         setLEDColor(100, 0, 255); //thinking color
         programSwitchState = false;
         loadDefaultDisplay();
-        setMotorBrakes(1, 1); // lock brakes
         setLEDColor(255, 255, 255);
         updateDisplayStatus("Idle");
     }
@@ -1036,8 +1008,6 @@ void loop() {
         Serial.print("Right speed: ");
         Serial.println(rightSpeed);
 
-
-        unlockMotors();
         setM1Speed(rightSpeed); // Forward
         setM2Speed(leftSpeed); // Forward
 
