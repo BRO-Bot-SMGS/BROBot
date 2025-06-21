@@ -54,9 +54,7 @@
 // ultrasonic sensor
 #define ULTRASONIC_TRIG 2
 #define ULTRASONIC_ECHO 4
-byte triggerPin = 21;
-byte echoCount = 2;
-byte* echoPins = new byte[echoCount] { 12, 13 };
+
         //sensor array
 // #define SENSOR_ARRAY_1 A0
 // #define SENSOR_ARRAY_2 A1
@@ -80,6 +78,8 @@ byte* echoPins = new byte[echoCount] { 12, 13 };
 const uint8_t sensorCount = 7;
 // #define NUM_SENSORS 13
 #define NUM_SENSORS 7
+// #define targetPosition 7000
+#define targetPosition (7 * 1000) / 2
 
 // const uint8_t sensorPins[sensorCount] = {
 //     SENSOR_ARRAY_1, SENSOR_ARRAY_2, SENSOR_ARRAY_3, SENSOR_ARRAY_4,
@@ -170,7 +170,6 @@ String calibrationStatus = "Calibrated - outdated";
 float duration, distance;  
 bool calibrationSwitchState = false;
 #define NUM_BUTTONS 3
-#define targetPosition 7000 // Adjust this value based on your sensor configuration
 float serialSpeed = 230400; // 4800, 9600, 38400, 115200
 String robotStatus = "Idle";
 bool systemReady = false;
@@ -1008,8 +1007,8 @@ void loop() {
         Serial.print("Right speed: ");
         Serial.println(rightSpeed);
 
-        setM1Speed(rightSpeed); // Forward
-        setM2Speed(leftSpeed); // Forward
+        setM1Speed(leftSpeed); // Forward
+        setM2Speed(rightSpeed); // Forward
 
         // Update last error
         lastError = error;
