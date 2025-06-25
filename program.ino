@@ -6,7 +6,8 @@
 #include <EEPROM.h>
 #include <string.h>
 #include <Bounce2.h>
-#include "Adafruit_VL53L0X.h"
+#include <Adafruit_VL53L1X.h>
+#include <Adafruit_VL6180X.h>
 #include "Adafruit_TCS34725.h"
 #include <Servo.h>
 // #include <DFRobot_I2C_Multiplexer.h>
@@ -126,15 +127,16 @@ static int lastError = 0;
 static float integral = 0;
 
 //TOF SETTINGS
-int slowDistance = 120; // distance from the bottle to start slowing down (in mm)
+int slowDistance = 235; // distance from the bottle to start slowing down (in mm)
 int bottleMaxSpeed = 60; // slow speed once bottle is in range
 int bottleBaseSpeed = 40; // max speed of the robot
-int goAroundDistance = 60; // distance from the bottle to start going around (in mm)
+int goAroundDistance = 180; // distance from the bottle to start going around (in mm)
 // movement temp variables
 int currentRightBaseSpeed = rightBaseSpeed;
 int currentLeftBaseSpeed = leftBaseSpeed;
 // int currentRightMaxSpeed = rightMaxSpeed;
 // int currentLeftMaxSpeed = leftMaxSpeed;
+int minTOFdistance = 30; // minimum distance to the bottle to start going around (in mm)
 bool lineFollow = true;
 
 //LINE ARRAY SETTINGS
@@ -195,6 +197,7 @@ bool tofSensorActive = false;
 bool obstacleAvoidanceActive = false;
 bool programSwitchState = false;
 int lastMultiplexerPort = -1;
+bool tempObsticleDetected;
 // servo variables
 int servo1Angle = 90;
 int servo2Angle = 90;
@@ -242,8 +245,8 @@ int rightRGB_blue = map(rightRGB_blueRaw, 0, 65535, 0, 255);
 // QTRSensors setup
 QTRSensors qtra;
 // tof sensor setup
-Adafruit_VL53L0X lox = Adafruit_VL53L0X();
-VL53L0X_RangingMeasurementData_t measure;
+Adafruit_VL53L1X vl53l1x = Adafruit_VL53L1X();
+
 // RGB sensor setup
 Adafruit_TCS34725 tcs = Adafruit_TCS34725(TCS34725_INTEGRATIONTIME_50MS, TCS34725_GAIN_4X);
 // Servo setup
@@ -301,56 +304,49 @@ void initSensorArray() {
     Serial.println("Sensor array initialized");
 }
 
-void initTOFSensor() {
-    // init front TOF sensor
-    selectMultiplexerPort(TOF_FRONT_MULTIPLEXER_PORT);
-    delay(100);
-    Serial.println("Front VL53L0X init");
-    if (!lox.begin()) {
-        Serial.println(F("Failed to boot front VL53L0X"));
-        errorCode = 301;
-    }
-
-    // init holder TOF sensor
-    selectMultiplexerPort(TOF_HOLDER_MULTIPLEXER_PORT);
-    delay(100);
-    Serial.println("Holder VL53L0X init...");
-    if (!lox.begin()) {
-        Serial.println(F("Failed to boot holder VL53L0X"));
-        if (errorCode == 301) {
-            errorCode = 303;
-        }
-        else {
-            errorCode = 302;
-        }
-    }
-
-    Serial.println("VL53L0X sensors initialized successfully.");
+void initTOFSensors() {
+    initTOFSensorHolder();
 }
+
+void initTOFSensorFront() {
+}
+
+void initTOFSensorHolder() {
+    selectMultiplexerPort(TOF_HOLDER_MULTIPLEXER_PORT);
+    delay(150);
+    if (!vl53l1x.begin(TOF_I2C_ADDRESS, &Wire)) {
+        Serial.println("Failed to find VL53L1X sensor!");
+        while (1);
+    } else {
+        Serial.println("VL53L1X ready.");
+        vl53l1x.startRanging();
+    }
+}
+
 
 void readTOFSensors() {
     // read front TOF sensor
-    selectMultiplexerPort(TOF_FRONT_MULTIPLEXER_PORT);
-    lox.rangingTest(&measure, false);
-    if (measure.RangeStatus != 4) {
-        Serial.print("Front TOF distance: ");
-        Serial.print(measure.RangeMilliMeter);
-        Serial.println(" mm");
-        frontTOFdistance = measure.RangeMilliMeter;
-    } else {
-        Serial.println("Front TOF out of range");
-    }
+    // selectMultiplexerPort(TOF_FRONT_MULTIPLEXER_PORT);
+    // lox.rangingTest(&measure, false);
+    // if (measure.RangeStatus != 4) {
+    //     Serial.print("Front TOF distance: ");
+    //     Serial.print(measure.RangeMilliMeter);
+    //     Serial.println(" mm");
+    //     frontTOFdistance = measure.RangeMilliMeter;
+    // } else {
+    //     Serial.println("Front TOF out of range");
+    // }
 
     // read holder TOF sensor
     selectMultiplexerPort(TOF_HOLDER_MULTIPLEXER_PORT);
-    lox.rangingTest(&measure, false);
-    if (measure.RangeStatus != 4) {
-        Serial.print("Holder TOF distance: ");
-        Serial.print(measure.RangeMilliMeter);
+    if (vl53l1x.dataReady()) {
+        holderTOFdistance = vl53l1x.distance();
+        Serial.print("Holder VL53L1X: ");
+        Serial.print(holderTOFdistance);
         Serial.println(" mm");
-        holderTOFdistance = measure.RangeMilliMeter;
+        vl53l1x.clearInterrupt();
     } else {
-        Serial.println("Holder TOF out of range");
+        Serial.println("Holder VL53L1X: Not ready");
     }
 }
 
@@ -827,6 +823,19 @@ void updateDisplayStatus(String status) {
     displayCalibrationData(1);
 }
 
+void obstacleGoAround () {
+    Serial.println("Obstacle detected and verified, going around...");
+    lineFollow = false; // Disable line following temporarily
+    setMotorSpeeds(0, 0); // Stop motors
+    delay(500); // Wait for a moment
+    setMotorSpeeds(-100, 100); // Turn around
+    delay(1000); // Adjust this delay based on your robot's turning speed
+    setMotorSpeeds(0, 0); // Stop again after turning
+    lineFollow = true; // Re-enable line following
+    Serial.println("Obstacle avoidance complete, resuming line following.");
+    updateDisplayStatus("Obstacle Avoided");
+}
+
 // multiplexer stuff
 
 void selectMultiplexerPort(int port) {
@@ -886,7 +895,7 @@ void setup() {
     delay(500);
     initDisplays(OLED_1_I2C_ADDRESS, OLED_2_I2C_ADDRESS, 1, brightness, contrast, OLED_DISPLAY_WIDTH, OLED_DISPLAY_HEIGHT, OLED_1_MULTIPLEXER_PORT, OLED_2_MULTIPLEXER_PORT);
     initSensorArray();
-    initTOFSensor();
+    initTOFSensors();
     buttonBounceSetup();
     motorTest();
     initServos();
@@ -950,9 +959,13 @@ void loop() {
         setLEDColor(255, 255, 0);
         programSwitchState = true;
         displayProgramData();
+        obstacleAvoidanceActive = true; // enable obstacle avoidance
+        lineFollow = true; // enable line following
+        tempObsticleDetected = false;
     }
 
     if (programSwitch.fell()) { // if the program switch is turned off do this once
+        holderTOFdistance = 1000; // reset holder TOF distance
         Serial.println("Program switch switched to LOW, stopping program...");
         setMotorSpeeds(0, 0);
         updateDisplayStatus("Stpng Prog");
@@ -968,6 +981,7 @@ void loop() {
     if (programSwitchState == true && lineFollow == true) { // while the program switch is on do this (loop)
 
         readRGBsensors();
+        readTOFSensors();
 
     // pid line following
         uint16_t sensorValues[NUM_SENSORS]; // Array to hold sensor values
@@ -1012,39 +1026,54 @@ void loop() {
 
         // Update last error
         lastError = error;
+        Serial.print("Position: ");
+        Serial.println(holderTOFdistance);
     }
 
-    if (programSwitchState == true && tofSensorActive == true) {
-        // tof sensing
-        readTOFSensors();
-    }
-
-    if (frontTOFdistance < slowDistance && obstacleAvoidanceActive == true) { // if the bottle is detected, slow down
+    if (holderTOFdistance < slowDistance && holderTOFdistance > minTOFdistance && obstacleAvoidanceActive == true) { // if the bottle is detected, slow down
+        tempObsticleDetected = true;
         updateDisplayStatus("Obst Slow");
         Serial.println("Bottle detected, slowing down...");
         currentLeftBaseSpeed = bottleBaseSpeed;
         currentRightBaseSpeed = bottleBaseSpeed;
     }
 
-    if (frontTOFdistance <= goAroundDistance && obstacleAvoidanceActive == true) { // go around when bottle is detected under the minimum distance
+    if (holderTOFdistance <= goAroundDistance && holderTOFdistance > minTOFdistance && obstacleAvoidanceActive == true) { // go around when bottle is detected under the minimum distance
         updateDisplayStatus("Go Around");
         Serial.println("Bottle detected and is under the minimum distance, going around...");
         lineFollow = false; // stop line following
-        delay(1000); // wait for 1 second to confirm the bottle is detected
+        setM1Speed(40); // Backward
+        setM2Speed(40); // Forward
+        delay(100); // wait for 1 second to confirm the bottle is detected
 
             // instructions to go around the obstacle
-            // setM1Speed(-bottleMaxSpeed); // Backward
-            // setM2Speed(bottleMaxSpeed); // Forward
-            // delay(1000); // wait for 1 second
-            // setM1Speed(bottleMaxSpeed); // Forward
-            // setM2Speed(bottleMaxSpeed); // Forward
-            // delay(1000); // wait for 1 second
-            // setM1Speed(-bottleMaxSpeed); // Backward
-            // setM2Speed(bottleMaxSpeed); // Forward
+            setM1Speed(-255);
+            setM2Speed(255);
+            delay(400);
+            setM1Speed(255);
+            setM2Speed(255);
+            delay(600);
+            setM1Speed(255);
+            setM2Speed(-255);
+            delay(400);
+            setM1Speed(255);
+            setM2Speed(255);
+            delay(1500);
+            setM1Speed(255);
+            setM2Speed(-255);
+            delay(400);
+            setM1Speed(255);
+            setM2Speed(255);
+            delay(600);
+            setM1Speed(-255);
+            setM2Speed(255);
+            delay(400);
+            setM1Speed(40); // Stop
+            setM2Speed(40); // Stop
 
             updateDisplayStatus("GoRoundCmplte");
             Serial.println("Go around complete, wait 1 second...");
-            delay(1000); // wait for 1 second
+            delay(100); // wait for 1 second
 
             // Once go around is complete
             currentLeftBaseSpeed = leftBaseSpeed;
@@ -1054,8 +1083,9 @@ void loop() {
             Serial.println("Resuming line following...");
     }
     
-    if (!(frontTOFdistance >= slowDistance) && obstacleAvoidanceActive == true) { // if the bottle is not detected, set the base speed back to normal
+    if (!(holderTOFdistance >= slowDistance && holderTOFdistance > minTOFdistance) && obstacleAvoidanceActive == true && tempObsticleDetected == true) { // if the bottle is not detected, set the base speed back to normal
         updateDisplayStatus("Obst Clear");
+        tempObsticleDetected = false;
         Serial.println("Bottle lost, setting base speed back to normal...");
         currentLeftBaseSpeed = leftBaseSpeed;
         currentRightBaseSpeed = rightBaseSpeed;
