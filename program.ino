@@ -31,17 +31,17 @@
 #define POWER_LED_BLUE_PIN 51
 
     //motor
-#define M1_DIR_PIN   7
-#define M1_PWM_PIN   6
-#define M2_DIR_PIN   4
-#define M2_PWM_PIN   5
+#define M1_DIR_PIN 7
+#define M1_PWM_PIN 6
+#define M2_DIR_PIN 4
+#define M2_PWM_PIN 5
     // servos
 #define SERVO1_PIN 44
 #define SERVO2_PIN 45
     //sensors
         //ultrasonic
 #define ULTRASONIC_TRIG 2
-#define ULTRASONIC_ECHO 4
+#define ULTRASONIC_ECHO 3
         // rgb sensor
 #define RGB_LEFT_LED 34
 #define RGB_RIGHT_LED 33
@@ -161,6 +161,16 @@ String right_currentColor;
 #define TCS34725_CT_Coef 3810.0
 #define TCS34725_CT_Offset 1391.0
 
+// EEPROM store settings
+// EEPROM can be 0 to 4095
+const uint16_t EEPROM_MAGIC = 0x424A;
+
+#define EEPROM_CALIB_BASE 200
+#define EEPROM_ADDR_MAGIC (EEPROM_CALIB_BASE)
+#define EEPROM_ADDR_MIN (EEPROM_CALIB_BASE + 2)
+#define EEPROM_ADDR_MAX (EEPROM_ADDR_MIN + NUM_SENSORS * 2)
+#define EEPROM_ADDR_INFO (EEPROM_ADDR_MAX + NUM_SENSORS * 2)
+
 //variables
 bool can_detected = false;
 float can_distance;
@@ -225,17 +235,6 @@ int rightRGB_blueRaw = 0;
 int rightRGB_red = map(rightRGB_redRaw, 0, 65535, 0, 255);
 int rightRGB_green = map(rightRGB_greenRaw, 0, 65535, 0, 255);
 int rightRGB_blue = map(rightRGB_blueRaw, 0, 65535, 0, 255);
-
-#define EEPROM_MAGIC 0xDEAD
-#define EEPROM_ADDR_MAGIC (eepromCalibrationOffset)
-#define EEPROM_ADDR_MIN (eepromCalibrationOffset + sizeof(uint16_t))
-#define EEPROM_ADDR_MAX (EEPROM_ADDR_MIN + NUM_SENSORS * sizeof(uint16_t))
-
-//eeprom addresses
-#define lastCalibrationAmountAddress 101
-#define lastCalibrationTimeAddress 102
-#define lastCalibrationDataAddress 103
-#define EEPROMindex 100
 
 //global setup
     // multiplexer setup
@@ -445,60 +444,90 @@ void resetDefaults(){
     pinMode(PROGRAM_SWITCH, INPUT_PULLUP);
 }
 
-//get stored values and store to variables
-void retrieveEEPROMvalues() {
-EEPROM.get(lastCalibrationTimeAddress, calibrationTime);
-EEPROM.get(lastCalibrationAmountAddress, calibrationAmount);
-}
 
 void storeCalibrationDataToEEPROM() {
-    int initialMinAddr = EEPROMindex;
-    int initialMaxAddr = EEPROMindex + NUM_SENSORS + 1;
-    int initialInfoAddr = EEPROMindex + NUM_SENSORS * 2 + 1;
-    // total eeprom addresses should be 31?
+    updateDisplayStatus("EEPROM Save");
+
     EEPROM.put(EEPROM_ADDR_MAGIC, EEPROM_MAGIC);
 
-    for (int i = 0; i < NUM_SENSORS; i++) { // store eeprom min values
-        int addr = initialMinAddr + i;
-        EEPROM.put(addr, qtra.calibrationOn.minimum[i]);
+    // Store minimum values
+    for (int i = 0; i < NUM_SENSORS; i++) {
+        uint16_t value = qtra.calibrationOn.minimum[i];
+        int addr = EEPROM_ADDR_MIN + i * 2;
+        EEPROM.put(addr, value);
     }
 
-    for (int i = 0; i < NUM_SENSORS; i++) { // store eeprom max values
-        int addr = initialMaxAddr + i;
-        EEPROM.put(addr, qtra.calibrationOn.maximum[i]);
+    // Store maximum values
+    for (int i = 0; i < NUM_SENSORS; i++) {
+        uint16_t value = qtra.calibrationOn.maximum[i];
+        int addr = EEPROM_ADDR_MAX + i * 2;
+        EEPROM.put(addr, value);
     }
 
-    // calibration info store
-    // 1 - calibration amount
-    // 2 - calibration time
-    // 3 - calibration valid
+    // Store calibration meta info (time, amount, valid)
+    int infoAddr = EEPROM_ADDR_INFO;
+    EEPROM.put(infoAddr, (uint32_t)calibrationTime);
+    infoAddr += sizeof(uint32_t);
+    EEPROM.put(infoAddr, (uint16_t)calibrationAmount);
+    infoAddr += sizeof(uint16_t);
+    uint8_t validFlag = 1;
+    EEPROM.put(infoAddr, validFlag);
 
-    EEPROM.put(initialInfoAddr, calibrationTime); // calibration time
-    EEPROM.put(initialInfoAddr+1, calibrationAmount); // calibration amount
-    EEPROM.put(initialInfoAddr+2, 1); // calibration valid
-
-    Serial.println("Calibration data successfully stored to EEPROM.");
+    Serial.println("Calibration data successfully stored to EEPROM");
+    updateDisplayStatus("Ready");
 }
 
-bool retrieveCalibrationDataFromEEPROM() {
+bool retrieveEEPROMvalues() {
     Serial.println("Looking for EEPROM calibration data...");
 
-    // if (EEPROM.read(initialInfoAddr+2) != true) {
-    //     Serial.println("No valid calibration data found in EEPROM.");
-    //     return false; // No valid calibration data found
-    // }
-
-    for (int i = 0; i < NUM_SENSORS; i++) { // load eeprom min values
-        int addr = EEPROM_ADDR_MIN + i;
-        EEPROM.get(addr, qtra.calibrationOn. minimum[i]);
+    uint16_t magicRead;
+    EEPROM.get(EEPROM_ADDR_MAGIC, magicRead);
+    if (magicRead != EEPROM_MAGIC) {
+        Serial.println("No valid magic header found");
+        int errorCode = 801;
+        return false;
     }
 
-    Serial.println("Calibration data loaded from EEPROM.");
+    int infoAddr = EEPROM_ADDR_INFO;
+    uint32_t storedTime;
+    uint16_t storedAmount;
+    uint8_t validFlag;
+    EEPROM.get(infoAddr, storedTime);
+    infoAddr += sizeof(uint32_t);
+    EEPROM.get(infoAddr, storedAmount);
+    infoAddr += sizeof(uint16_t);
+    EEPROM.get(infoAddr, validFlag);
 
+    if (validFlag != 1) {
+        Serial.println("Calibration invalid");
+        int errorCode = 802;
+        return false;
+    }
+
+    // Load minimum values
+    for (int i = 0; i < NUM_SENSORS; i++) {
+        uint16_t value;
+        int addr = EEPROM_ADDR_MIN + i * 2;
+        EEPROM.get(addr, value);
+        qtra.calibrationOn.minimum[i] = value;
+    }
+
+    // Load maximum values
+    for (int i = 0; i < NUM_SENSORS; i++) {
+        uint16_t value;
+        int addr = EEPROM_ADDR_MAX + i * 2;
+        EEPROM.get(addr, value);
+        qtra.calibrationOn.maximum[i] = value;
+    }
+
+    calibrationTime = storedTime;
+    calibrationAmount = storedAmount;
+    calibrationStatus = "Calibrated (EEPROM)";
+    Serial.println("Calibration data loaded from EEPROM.");
+    return true;
 }
 
 // servo stuff
-
 void initServos() {
     servo1.attach(SERVO1_PIN);
     servo2.attach(SERVO2_PIN);
@@ -769,9 +798,9 @@ void loadDefaultDisplay() {
 
 void longTermMemoryStore(int address, int value){
     // EEPROM.write(address, value); // Write the value to the specified address **BE CAREFUL max 100k writes
+    // uncomment above to actually do it
     Serial.println("Stored " + String(value) + " at address " + String(address)); 
 }
-
 
 // motor control
 
@@ -780,7 +809,7 @@ void setM1Speed(int speed) {
         digitalWrite(M1_DIR_PIN, LOW);
     } else {
         digitalWrite(M1_DIR_PIN, HIGH);
-        speed = -speed;
+       speed = -speed;
     }
     analogWrite(M1_PWM_PIN, constrain(speed, 0, 255));
 }
@@ -924,7 +953,7 @@ void loop() {
         displayCalibrationData(1);
         Serial.println("Calibration switch switched to LOW, stopping calibration...");
         Serial.println("Saving calibration data to EEPROM...");
-        // storeCalibrationDataToEEPROM();
+        storeCalibrationDataToEEPROM();
         Serial.println("Calibration data:");
         Serial.println("Updating display with calibration data...");
         robotStatus = "Idle";
