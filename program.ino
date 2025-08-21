@@ -43,8 +43,8 @@
 #define ULTRASONIC_TRIG 2
 #define ULTRASONIC_ECHO 3
         // rgb sensor
-#define RGB_LEFT_LED 34
-#define RGB_RIGHT_LED 33
+#define RGB_LEFT_LED 10
+#define RGB_RIGHT_LED 9
 
     // switches
 #define PROGRAM_SWITCH 51 // not interupt pin
@@ -303,6 +303,16 @@ void initSensorArray() {
     Serial.println("Sensor array initialized");
 }
 
+void initRGBsensors() {
+    setRGBLEDIntensity(255, 0);
+    delay(200);
+    setRGBLEDIntensity(0, 255);
+    delay(200);
+    setRGBLEDIntensity(255, 255);
+    delay(300);
+    setRGBLEDIntensity(0, 0);
+}
+
 void initTOFSensors() {
     initTOFSensorHolder();
 }
@@ -392,6 +402,14 @@ void readRGBsensors() {
     silent_selectMultiplexerPort(RGB_RIGHT_MULTIPLEXER_PORT);
     tcs.getRawData(&r, &g, &b, &c);
     convertToRGB(r, g, b, c, rightRGB_red, rightRGB_green, rightRGB_blue);
+}
+
+void setRGBLEDIntensity(int leftTarget, int rightTarget) {
+    // constrain targets 0-255
+    leftTarget = constrain(leftTarget, 0, 255);
+    rightTarget = constrain(rightTarget, 0, 255);
+    analogWrite(RGB_LEFT_LED, leftTarget);
+    analogWrite(RGB_RIGHT_LED, rightTarget);
 }
 
 void detectColor() {
@@ -914,24 +932,24 @@ void setup() {
     retrieveEEPROMvalues();
     setMotorSpeeds(0, 0);
     setLEDColor(255, 0, 0); //red
-    delay(200);
+    delay(60);
     setLEDColor(0, 255, 0); //green
-    delay(200);
+    delay(60);
     setLEDColor(0, 0, 255); //blue
-    delay(200);
+    delay(60);
     setLEDColor(100, 0, 255); //thinking color
-
-    delay(500);
+    initRGBsensors();
     initDisplays(OLED_1_I2C_ADDRESS, OLED_2_I2C_ADDRESS, 1, brightness, contrast, OLED_DISPLAY_WIDTH, OLED_DISPLAY_HEIGHT, OLED_1_MULTIPLEXER_PORT, OLED_2_MULTIPLEXER_PORT);
     initSensorArray();
     initTOFSensors();
     buttonBounceSetup();
     motorTest();
+    retrieveEEPROMvalues();
     initServos();
     servoCalibration();
     servoTest();
     Serial.println("Setup complete");
-    delay(650);
+    delay(400);
     loadDefaultDisplay();
     Serial.println("Default display loaded");
     systemReady = true;
