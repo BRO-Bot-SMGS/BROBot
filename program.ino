@@ -15,7 +15,7 @@
 // -- PINS --
     // led
     // led default (delete this)
-#define LED_RED_PIN 10 //pwm pin
+#define LED_RED_PIN 11 //pwm pin
 #define LED_GREEN_PIN 54 //pwm pin
 #define LED_BLUE_PIN 46 //pwm pin
 // SPEED LED (top center)
@@ -71,7 +71,6 @@
 // #define SENSOR_ARRAY_12 A11
 // #define SENSOR_ARRAY_13 A12
 
-#define SENSOR_ARRAY_SIZE 13
 #define EMITTER_ODD_PIN 36
 #define EMITTER_EVEN_PIN 37
 
@@ -114,8 +113,8 @@ const uint8_t sensorPins[sensorCount] = {
 
 //settings
 //PID SETTINGS
-#define kp 0.25 // experiment to determine this, start by something small that just makes your bot follow the line at a slow speed
-#define kd 5.0// experiment to determine this, slowly increase the speeds and adjust this value.
+#define kp 0.20 // experiment to determine this, start by something small that just makes your bot follow the line at a slow speed
+#define kd 3.0// experiment to determine this, slowly increase the speeds and adjust this value.
 #define ki 0.0 // experiment to determine this, start by something small that just makes your bot follow the line at a slow speed
 //speeds out of 255
 // #define rightMaxSpeed 200 // max speed of the robot
@@ -152,6 +151,7 @@ int contrast = 255;
 uint16_t r, g, b, c;
 String left_currentColor;
 String right_currentColor;
+int targetLEDIntensity = 15;
 //rgb autorange
 #define TCS34725_R_Coef 0.136
 #define TCS34725_G_Coef 1.000
@@ -194,7 +194,7 @@ int lineBrightnessMinimum = 100;
 bool programDisplayAlertStatus = false;
 String programDisplayAlert = "Alert Test";
 bool lineLost = false;
-int sensorValues[SENSOR_ARRAY_SIZE];
+int sensorValues[sensorCount];
 int position = 0;
 int error = 0;
 int leftSpeed = 0;
@@ -267,7 +267,7 @@ Bounce settingsSwitch = Bounce();
 
 void setPinModes(){
     // sensor array
-    for (int i = 0; i < SENSOR_ARRAY_SIZE; i++) {
+    for (int i = 0; i < sensorCount; i++) {
         pinMode(sensorPins[i], INPUT); // Use sensorPins array here
     }
     // toggle switches
@@ -292,6 +292,9 @@ void setPinModes(){
     pinMode(LED_RED_PIN, OUTPUT);
     pinMode(LED_GREEN_PIN, OUTPUT);
     pinMode(LED_BLUE_PIN, OUTPUT);
+    // rgb sensor leds
+    pinMode(RGB_LEFT_LED, OUTPUT);
+    pinMode(RGB_RIGHT_LED, OUTPUT);
 }
 
 void initSensorArray() {
@@ -502,7 +505,7 @@ bool retrieveEEPROMvalues() {
     EEPROM.get(EEPROM_ADDR_MAGIC, magicRead);
     if (magicRead != EEPROM_MAGIC) {
         Serial.println("No valid magic header found");
-        int errorCode = 801;
+        errorCode = 801;
         return false;
     }
 
@@ -518,25 +521,60 @@ bool retrieveEEPROMvalues() {
 
     if (validFlag != 1) {
         Serial.println("Calibration invalid");
-        int errorCode = 802;
+        errorCode = 802;
         return false;
     }
 
+    qtra.resetCalibration();
+
+    if (qtra.calibrationOn.minimum == 0) {
+        qtra.calibrationOn.minimum = new unsigned int[sensorCount];
+        for (int i = 0; i < sensorCount; i++) qtra.calibrationOn.minimum[i] = 0;
+    }
+    if (qtra.calibrationOn.maximum == 0) {
+        qtra.calibrationOn.maximum = new unsigned int[sensorCount];
+        for (int i = 0; i < sensorCount; i++) qtra.calibrationOn.maximum[i] = 0;
+    }
+
+    int limit = (NUM_SENSORS < sensorCount) ? NUM_SENSORS : sensorCount;
+
     // Load minimum values
-    for (int i = 0; i < NUM_SENSORS; i++) {
+    for (int i = 0; i < limit; i++) {
         uint16_t value;
         int addr = EEPROM_ADDR_MIN + i * 2;
         EEPROM.get(addr, value);
         qtra.calibrationOn.minimum[i] = value;
+        calibratedMinimumOn[i] = value;
+        delay(2);
     }
 
+    delay(200);
+
     // Load maximum values
-    for (int i = 0; i < NUM_SENSORS; i++) {
+    for (int i = 0; i < limit; i++) {
         uint16_t value;
         int addr = EEPROM_ADDR_MAX + i * 2;
         EEPROM.get(addr, value);
         qtra.calibrationOn.maximum[i] = value;
+        calibratedMaximumOn[i] = value;
+        delay(2);
     }
+
+    Serial.println("Loaded EEPROM calibration values:");
+
+    Serial.print("Minimum: ");
+    for (int i = 0; i < limit; i++) {
+        Serial.print(qtra.calibrationOn.minimum[i]);
+        if (i < limit - 1) Serial.print(',');
+    }
+    Serial.println();
+
+    Serial.print("Maximum: ");
+    for (int i = 0; i < limit; i++) {
+        Serial.print(qtra.calibrationOn.maximum[i]);
+        if (i < limit - 1) Serial.print(',');
+    }
+    Serial.println();
 
     calibrationTime = storedTime;
     calibrationAmount = storedAmount;
@@ -929,7 +967,6 @@ void setup() {
     delay(600);
     Wire.begin();
     setPinModes();
-    retrieveEEPROMvalues();
     setMotorSpeeds(0, 0);
     setLEDColor(255, 0, 0); //red
     delay(60);
@@ -976,13 +1013,15 @@ void loop() {
         Serial.println("Updating display with calibration data...");
         robotStatus = "Idle";
         calibrationStatus = "Calibrated this session (:";
-        displayCalibrationData(1);
         Serial.println("Display updated with calibration data");
         Serial.println("Calibration complete");
+        setRGBLEDIntensity(0, 0);
         setLEDColor(0, 0, 0);
+        displayCalibrationData(1);
     }
 
     if (calibrationSwitch.rose()) { // if the calibration switch is turned on do this once
+        setRGBLEDIntensity(targetLEDIntensity, targetLEDIntensity);
         setLEDColor(100, 0, 255); //thinking color
         calibrationSwitchState = true;
         Serial.println("Calibration switch switched to HIGH, calibrating...");
@@ -996,11 +1035,11 @@ void loop() {
 
     if (calibrationSwitchState == true) {
         calibrateSensor();
-        // displayCalibrationData(1);
-        delay(2);
+        delay(1);
     }
 
     if (programSwitch.rose()) { // if the program switch is turned on do this once
+        setRGBLEDIntensity(targetLEDIntensity, targetLEDIntensity);
         Serial.println("Program switch switched to HIGH, starting program...");
         updateDisplayStatus("Runng Prog");
         setLEDColor(255, 255, 0);
@@ -1020,6 +1059,7 @@ void loop() {
         programSwitchState = false;
         loadDefaultDisplay();
         setLEDColor(255, 255, 255);
+        setRGBLEDIntensity(0, 0);
         updateDisplayStatus("Idle");
     }
 
